@@ -181,11 +181,11 @@ export default function Home() {
       </div>
 
       <iframe
-        src={`https://lvpr.tv/?v=${PLAYBACK_ID}&lowLatency=force`}
-        style={{ flexGrow: 1, border: "none", width: "100%" }}
-        allow="autoplay; fullscreen"
-        allowFullScreen
-      />
+  src={`https://lvpr.tv/?v=${PLAYBACK_ID}&lowLatency=force&embed=1`}
+  style={{ flexGrow: 1, border: "none", width: "100%" }}
+  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+  allowFullScreen
+/>
     </main>
   );
 }
