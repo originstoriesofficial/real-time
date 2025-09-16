@@ -24,7 +24,6 @@ const styles = [
 
 function generatePrompt(base: string) {
   const style = styles[Math.floor(Math.random() * styles.length)];
-  // keep prompt simple; seed stays in params
   return `a ${base} scene, ${style}`;
 }
 
@@ -112,67 +111,81 @@ export default function Home() {
   };
 
   return (
-    <main style={{ padding: 40, fontFamily: "Inter, system-ui, sans-serif" }}>
-      <h1>VPM PRO - Real-Time Mode: <strong>{mode.toUpperCase()}</strong></h1>
+    <main style={{
+      margin: 0,
+      padding: 0,
+      height: "100vh",
+      width: "100vw",
+      display: "flex",
+      flexDirection: "column",
+      fontFamily: "Inter, system-ui, sans-serif",
+    }}>
+      <div style={{ padding: "20px" }}>
+        <h1>VPM PRO - Real-Time Mode: <strong>{mode.toUpperCase()}</strong></h1>
 
-      <div style={{ marginBottom: 20 }}>
-        {modes.map((m) => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            disabled={busy}
-            style={{
-              padding: "10px 20px",
-              marginRight: 10,
-              backgroundColor: mode === m ? "#111" : "#eee",
-              color: mode === m ? "#fff" : "#000",
-              border: "none",
-              borderRadius: 8,
-              cursor: busy ? "not-allowed" : "pointer",
-              fontWeight: "bold",
-            }}
-          >
-            {m.toUpperCase()}
-          </button>
-        ))}
-      </div>
-
-      {error && (
-        <div role="alert" style={{ background: "#ffe8e8", border: "1px solid #f5b5b5", color: "#7a1e1e", padding: 12, borderRadius: 8, marginBottom: 12 }}>
-          {error}
+        <div style={{ marginBottom: 20 }}>
+          {modes.map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              disabled={busy}
+              style={{
+                padding: "10px 20px",
+                marginRight: 10,
+                backgroundColor: mode === m ? "#111" : "#eee",
+                color: mode === m ? "#fff" : "#000",
+                border: "none",
+                borderRadius: 8,
+                cursor: busy ? "not-allowed" : "pointer",
+                fontWeight: "bold",
+              }}
+            >
+              {m.toUpperCase()}
+            </button>
+          ))}
         </div>
-      )}
 
-      <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap" }}>
-        {tags.map((tag) => (
-          <button
-            key={tag}
-            onClick={() => handlePromptSubmit(tag)}
-            disabled={busy}
-            style={{
-              padding: "12px 24px",
-              margin: 8,
-              fontSize: "16px",
-              borderRadius: "10px",
-              cursor: busy ? "not-allowed" : "pointer",
-              border: "1px solid #ccc",
-              backgroundColor: busy ? "#f1f1f1" : "#f9f9f9",
-            }}
-          >
-            {busy ? "Sending..." : tag}
-          </button>
-        ))}
+        {error && (
+          <div role="alert" style={{
+            background: "#ffe8e8",
+            border: "1px solid #f5b5b5",
+            color: "#7a1e1e",
+            padding: 12,
+            borderRadius: 8,
+            marginBottom: 12,
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexWrap: "wrap", marginBottom: 20 }}>
+          {tags.map((tag) => (
+            <button
+              key={tag}
+              onClick={() => handlePromptSubmit(tag)}
+              disabled={busy}
+              style={{
+                padding: "12px 24px",
+                margin: 8,
+                fontSize: "16px",
+                borderRadius: "10px",
+                cursor: busy ? "not-allowed" : "pointer",
+                border: "1px solid #ccc",
+                backgroundColor: busy ? "#f1f1f1" : "#f9f9f9",
+              }}
+            >
+              {busy ? "Sending..." : tag}
+            </button>
+          ))}
+        </div>
       </div>
 
       <iframe
-  src={`https://lvpr.tv/?v=${PLAYBACK_ID}&lowLatency=force`}
-  width="100%"
-  height="500"
-  style={{ marginTop: 40, border: "none" }}
-  allow="autoplay; fullscreen"
-  allowFullScreen={true}
-/>
-
+        src={`https://lvpr.tv/?v=${PLAYBACK_ID}&lowLatency=force`}
+        style={{ flexGrow: 1, border: "none", width: "100%" }}
+        allow="autoplay; fullscreen"
+        allowFullScreen
+      />
     </main>
   );
 }
