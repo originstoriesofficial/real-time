@@ -170,6 +170,8 @@ export default function Home() {
       height="500"
       style={{ marginTop: 40, border: "none" }}
       allow="autoplay; fullscreen"
+      allowFullScreen  
+
       />
 
     </main>
