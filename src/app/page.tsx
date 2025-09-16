@@ -165,14 +165,13 @@ export default function Home() {
       </div>
 
       <iframe
-      src={`https://lvpr.tv/?v=${PLAYBACK_ID}&lowLatency=force`}
-      width="100%"
-      height="500"
-      style={{ marginTop: 40, border: "none" }}
-      allow="autoplay; fullscreen"
-      allowFullScreen  
-
-      />
+  src={`https://lvpr.tv/?v=${PLAYBACK_ID}&lowLatency=force`}
+  width="100%"
+  height="500"
+  style={{ marginTop: 40, border: "none" }}
+  allow="autoplay; fullscreen"
+  allowFullScreen={true}
+/>
 
     </main>
   );
