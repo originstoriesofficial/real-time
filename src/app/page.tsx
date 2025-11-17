@@ -3,12 +3,13 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { fal } from "@fal-ai/client";
 
+// --- CONFIG ---
 fal.config({
   credentials: process.env.NEXT_PUBLIC_FAL_KEY || "",
 });
 
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY!;
-const PIPELINE_ID = "pip_SD-turbo";
+const DEFAULT_PIPELINE = "pip_SD-turbo";
 
 const modes = ["dj", "karaoke", "live"] as const;
 type Mode = (typeof modes)[number];
@@ -40,7 +41,7 @@ const liveTags = [
   "dreamy concert",
 ];
 
-// helper: build styled prompt
+// --- Helpers ---
 function generatePrompt(base: string, mode: Mode) {
   const styles = [
     "award-winning cinematic, 3D, vibrant monochromatic, crystallized, 4k",
@@ -58,26 +59,30 @@ function generatePrompt(base: string, mode: Mode) {
       : "";
 
   const enriched =
-    base.trim().split(" ").length <= 2 ? `performer in ${base.trim()}` : base.trim();
+    base.trim().split(" ").length <= 2
+      ? `performer in ${base.trim()}`
+      : base.trim();
 
   return `a ${enriched} scene${performerFocus}, ${style}`;
 }
 
+// --- COMPONENT ---
 export default function Home() {
   const [mode, setMode] = useState<Mode>("dj");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customPrompt, setCustomPrompt] = useState("");
   const [songPrompt, setSongPrompt] = useState("");
-  const [aiPrompt, setAiPrompt] = useState<string | null>(null);
-  const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [stream, setStream] = useState<{ id: string; playbackId: string; whipUrl: string } | null>(
-    null
-  );
+  const [stream, setStream] = useState<{
+    id: string;
+    playbackId: string;
+    whipUrl: string;
+  } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // --- FULLSCREEN HANDLER ---
   useEffect(() => {
     const handleChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", handleChange);
@@ -85,18 +90,22 @@ export default function Home() {
   }, []);
 
   const requestFullscreen = () => {
-    const elem = containerRef.current;
-    if (elem?.requestFullscreen) elem.requestFullscreen();
+    const el = containerRef.current;
+    if (!el) return;
+    if (el.requestFullscreen) el.requestFullscreen();
+    else if ((el as any).webkitRequestFullscreen)
+      (el as any).webkitRequestFullscreen();
   };
 
+  // --- TAG SET ---
   const tags = useMemo(() => {
     if (mode === "dj") return djMoods;
     if (mode === "karaoke") return karaokeGenres;
     return liveTags;
   }, [mode]);
 
-  // --- Create stream ---
-  const createStream = async () => {
+  // --- CREATE STREAM ---
+  const createStream = async (pipelineId = DEFAULT_PIPELINE) => {
     try {
       console.log("🎥 Creating new stream...");
       const res = await fetch("https://api.daydream.live/v1/streams", {
@@ -105,16 +114,16 @@ export default function Home() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${API_KEY}`,
         },
-        body: JSON.stringify({ pipeline_id: PIPELINE_ID }),
+        body: JSON.stringify({ pipeline_id: pipelineId }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
+      console.log("✅ Stream created:", data);
       setStream({
         id: data.id,
         playbackId: data.output_playback_id,
         whipUrl: data.whip_url,
       });
-      console.log("✅ Stream created:", data);
       return data;
     } catch (err) {
       console.error("❌ Stream creation failed:", err);
@@ -127,7 +136,7 @@ export default function Home() {
     if (!stream) createStream();
   }, []);
 
-  // --- send parameters to daydream ---
+  // --- SEND PROMPT TO DAYDREAM ---
   const sendPromptToDaydream = async (finalPrompt: string) => {
     if (!finalPrompt?.trim()) return setError("Prompt is empty.");
     if (!API_KEY) return setError("Missing Daydream API key.");
@@ -143,8 +152,7 @@ export default function Home() {
       };
     }
 
-    const seed = Math.floor(Math.random() * 10_000);
-
+    const seed = Math.floor(Math.random() * 100000);
     const params = {
       model_id: "stabilityai/sd-turbo",
       prompt: finalPrompt.trim(),
@@ -170,33 +178,6 @@ export default function Home() {
           control_guidance_end: 1,
           control_guidance_start: 0,
           enabled: true,
-          model_id: "thibaud/controlnet-sd21-hed-diffusers",
-          preprocessor: "soft_edge",
-          preprocessor_params: {},
-        },
-        {
-          conditioning_scale: 0.2,
-          control_guidance_end: 1,
-          control_guidance_start: 0,
-          enabled: true,
-          model_id: "thibaud/controlnet-sd21-canny-diffusers",
-          preprocessor: "canny",
-          preprocessor_params: { high_threshold: 200, low_threshold: 100 },
-        },
-        {
-          conditioning_scale: 0.2,
-          control_guidance_end: 1,
-          control_guidance_start: 0,
-          enabled: true,
-          model_id: "thibaud/controlnet-sd21-depth-diffusers",
-          preprocessor: "depth_tensorrt",
-          preprocessor_params: {},
-        },
-        {
-          conditioning_scale: 0.2,
-          control_guidance_end: 1,
-          control_guidance_start: 0,
-          enabled: true,
           model_id: "thibaud/controlnet-sd21-color-diffusers",
           preprocessor: "passthrough",
           preprocessor_params: {},
@@ -206,22 +187,23 @@ export default function Home() {
 
     try {
       console.log("🚀 Sending prompt:", params);
-      const res = await fetch(`https://api.daydream.live/v1/streams/${currentStream.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${API_KEY}`,
-        },
-        body: JSON.stringify({ params }),
-      });
-
+      const res = await fetch(
+        `https://api.daydream.live/v1/streams/${currentStream.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${API_KEY}`,
+          },
+          body: JSON.stringify({ params }),
+        }
+      );
       const text = await res.text();
       if (!res.ok) throw new Error(`Daydream ${res.status}: ${text}`);
-      console.log("✅ Prompt applied successfully:", finalPrompt);
-      setGeneratedPrompt(finalPrompt);
+      console.log("✅ Prompt applied successfully.");
     } catch (err) {
       console.error("❌ Daydream error:", err);
-      setError("Daydream API failed. Recreating stream...");
+      setError("Daydream API failed — recreating stream...");
       setStream(null);
       await createStream();
     } finally {
@@ -229,79 +211,71 @@ export default function Home() {
     }
   };
 
-  // --- manual prompt submission ---
+  // --- MANUAL PROMPT ---
   const handlePromptSubmit = async (base: string) => {
     if (!base.trim()) return setError("Enter a prompt first.");
     const merged = generatePrompt(base, mode);
+    setBusy(true);
     await sendPromptToDaydream(merged);
   };
 
-  // --- song -> fal-ai -> daydream ---
+  // --- SONG → CLAUDE → DAYDREAM ---
   const fetchSongVisualContext = async () => {
     if (!songPrompt.trim()) return setError("Enter a song name first.");
     setBusy(true);
     setError(null);
-  
     try {
       const result = await fal.subscribe("openrouter/router", {
         input: {
           prompt: `
-  You are a world-class music video and visual culture expert trained on the global catalogue of songs, music videos, and stage performances from every era.
-  
-  When given a song, you will:
-  1. Identify its release period, cultural and visual trends at that time.
-  2. Recall or infer the actual *music video’s* visual themes, lighting, wardrobe, set design, and color palette.
-  3. Identify the genre's defining visual language (e.g., 90s teen pop, early 2000s R&B, synthwave 80s revival, etc.).
-  4. Construct a cinematic generative prompt that recreates that visual *atmosphere* faithfully — using filmic terms, lighting descriptors, and compositional language.
-  
-  Rules:
-  - Base your description on factual knowledge and real music video references if available.
-  - Avoid literal lyric interpretations.
-  - Do not name the artist or song in the output.
-  - Focus on describing the visual world so a diffusion model could recreate it.
-  
-  Song: "${songPrompt}"
-  
-  Respond only with the final cinematic prompt, no explanations.
-          `,
+You are a visual culture AI trained on the global catalogue of music videos and stage performances.
+
+Task: Given a song title, research its *actual* music video (if it exists) or deduce the genre and era visual trends.
+Extract: lighting, cinematography, wardrobe, set design, color palette, camera motion, and performance mood.
+
+Then output a single cinematic generative prompt that recreates that visual look for diffusion or video generation.
+No artist or lyric names — only filmic, visual language.
+
+Song: "${songPrompt}"
+Respond only with the final cinematic prompt.`,
           model: "anthropic/claude-3.5-sonnet",
-          temperature: 0.4, // lower for factual accuracy
-          max_tokens: 300,
+          temperature: 0.35,
+          max_tokens: 350,
         },
       });
-  
+
       const output = result.data?.output?.trim() ?? "";
-      console.log("🎬 Claude factual visual prompt:", output);
-  
-      // Send directly to Daydream (no UI echo)
+      console.log("🎬 Claude visual:", output);
       if (output) await sendPromptToDaydream(output);
       else setError("Claude returned no visual data.");
     } catch (e) {
       console.error("❌ Fal AI error:", e);
-      setError("Failed to generate factual song visuals.");
+      setError("Failed to generate song visuals.");
     } finally {
       setBusy(false);
     }
   };
-  
 
+  // --- RENDER ---
   return (
     <main
       style={{
-        margin: 0,
-        padding: 0,
         height: "100vh",
         width: "100vw",
+        margin: 0,
+        padding: 0,
         background: "#000",
         color: "#fff",
-        position: "relative",
         fontFamily: "Inter, sans-serif",
         overflow: "hidden",
+        position: "relative",
       }}
     >
       {!isFullscreen && (
-        <div style={{ padding: 20, zIndex: 2, position: "relative" }}>
-          <h1>🎛 VPM PRO — Mode: <strong>{mode.toUpperCase()}</strong></h1>
+        <div style={{ padding: 20, position: "relative", zIndex: 2 }}>
+          <h1>
+            🎛 VPM PRO — Mode: <strong>{mode.toUpperCase()}</strong>
+          </h1>
 
           {/* mode buttons */}
           <div style={{ marginBottom: 20 }}>
@@ -309,14 +283,15 @@ export default function Home() {
               <button
                 key={m}
                 onClick={() => setMode(m)}
+                disabled={busy}
                 style={{
                   padding: "10px 20px",
                   marginRight: 10,
                   backgroundColor: mode === m ? "#111" : "#eee",
                   color: mode === m ? "#fff" : "#000",
-                  borderRadius: 8,
                   border: "none",
-                  cursor: "pointer",
+                  borderRadius: 8,
+                  cursor: busy ? "not-allowed" : "pointer",
                   fontWeight: "bold",
                 }}
               >
@@ -339,7 +314,7 @@ export default function Home() {
             </button>
           </div>
 
-          {/* manual prompt box */}
+          {/* manual prompt input */}
           <div style={{ marginBottom: 25 }}>
             <h3>🎨 Manual Visual Prompt</h3>
             <input
@@ -352,7 +327,7 @@ export default function Home() {
                 width: "60%",
                 marginRight: "10px",
                 borderRadius: "8px",
-                border: "1px solid #ccc",
+                border: "1px solid #555",
               }}
             />
             <button
@@ -372,7 +347,7 @@ export default function Home() {
             </button>
           </div>
 
-          {/* song to AI */}
+          {/* song input */}
           <div style={{ marginBottom: 25 }}>
             <h3>🎵 Song to Visual AI</h3>
             <input
@@ -385,7 +360,7 @@ export default function Home() {
                 width: "60%",
                 marginRight: "10px",
                 borderRadius: "8px",
-                border: "1px solid #ccc",
+                border: "1px solid #555",
               }}
             />
             <button
@@ -405,23 +380,7 @@ export default function Home() {
             </button>
           </div>
 
-          {aiPrompt && (
-            <div
-              style={{
-                background: "#111",
-                padding: "10px 15px",
-                borderRadius: 8,
-                marginBottom: 20,
-                color: "#ccc",
-                fontSize: "14px",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              <strong>AI Visual Context:</strong> {aiPrompt}
-            </div>
-          )}
-
-          {/* preset buttons */}
+          {/* tag presets */}
           <div style={{ display: "flex", flexWrap: "wrap", marginBottom: 20 }}>
             {tags.map((tag) => (
               <button
@@ -433,7 +392,7 @@ export default function Home() {
                   margin: 8,
                   fontSize: "16px",
                   borderRadius: "10px",
-                  border: "1px solid #ccc",
+                  border: "1px solid #444",
                   backgroundColor: busy ? "#222" : "#333",
                   color: "#fff",
                   cursor: "pointer",
@@ -460,7 +419,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* fullscreen display */}
+      {/* fullscreen / display area */}
       <div
         ref={containerRef}
         style={{
@@ -470,11 +429,13 @@ export default function Home() {
           transform: "translate(-50%, -50%)",
           width: "1920px",
           height: "1080px",
+          aspectRatio: "16 / 9",
           maxWidth: "100vw",
           maxHeight: "100vh",
-          zIndex: 1,
           overflow: "hidden",
           backgroundColor: "#000",
+          zIndex: 1,
+          border: "none",
         }}
       >
         {stream?.playbackId && (
