@@ -31,8 +31,16 @@ const karaokeGenres = [
   "country sunset drive",
   "electronic trance bloom",
 ];
-const liveTags = ["epic", "intimate", "city vibes", "lofi party", "surreal crowd", "dreamy concert"];
+const liveTags = [
+  "epic",
+  "intimate",
+  "city vibes",
+  "lofi party",
+  "surreal crowd",
+  "dreamy concert",
+];
 
+// helper: build styled prompt
 function generatePrompt(base: string, mode: Mode) {
   const styles = [
     "award-winning cinematic, 3D, vibrant monochromatic, crystallized, 4k",
@@ -70,7 +78,6 @@ export default function Home() {
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // fullscreen tracking
   useEffect(() => {
     const handleChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", handleChange);
@@ -88,9 +95,10 @@ export default function Home() {
     return liveTags;
   }, [mode]);
 
-  // create stream once
+  // --- Create stream ---
   const createStream = async () => {
     try {
+      console.log("🎥 Creating new stream...");
       const res = await fetch("https://api.daydream.live/v1/streams", {
         method: "POST",
         headers: {
@@ -99,12 +107,19 @@ export default function Home() {
         },
         body: JSON.stringify({ pipeline_id: PIPELINE_ID }),
       });
+      if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      setStream({ id: data.id, playbackId: data.output_playback_id, whipUrl: data.whip_url });
-      console.log("🎥 Stream created:", data);
+      setStream({
+        id: data.id,
+        playbackId: data.output_playback_id,
+        whipUrl: data.whip_url,
+      });
+      console.log("✅ Stream created:", data);
+      return data;
     } catch (err) {
-      console.error(err);
-      setError("Stream creation failed");
+      console.error("❌ Stream creation failed:", err);
+      setError("Stream creation failed. Check API key or connection.");
+      return null;
     }
   };
 
@@ -112,79 +127,163 @@ export default function Home() {
     if (!stream) createStream();
   }, []);
 
-  // call Fal AI / Claude for visual context
-  const fetchSongVisualContext = async () => {
-    if (!songPrompt.trim()) return setError("Enter a song name first.");
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await fal.subscribe("openrouter/router", {
-        input: {
-          prompt: `You are trained on the visual and cinematic language of all music videos. Given the song "${songPrompt}", describe a vivid cinematic visual scene with lighting, color palette, motion, texture, and mood.`,
-          model: "anthropic/claude-3.5-sonnet",
-          temperature: 0.7,
-          max_tokens: 250,
-        },
-      });
-      const output = result.data?.output ?? "";
-      setAiPrompt(output);
-      console.log("🎨 Claude generated visual context:", output);
-      await sendPromptToDaydream(output);
-    } catch (e) {
-      console.error(e);
-      setError("Failed to fetch visual context.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // unified send to Daydream
+  // --- send parameters to daydream ---
   const sendPromptToDaydream = async (finalPrompt: string) => {
-    if (!stream?.id || !API_KEY) return setError("Stream not ready or API key missing");
+    if (!finalPrompt?.trim()) return setError("Prompt is empty.");
+    if (!API_KEY) return setError("Missing Daydream API key.");
+
+    let currentStream = stream;
+    if (!currentStream) {
+      const newStream = await createStream();
+      if (!newStream) return;
+      currentStream = {
+        id: newStream.id,
+        playbackId: newStream.output_playback_id,
+        whipUrl: newStream.whip_url,
+      };
+    }
 
     const seed = Math.floor(Math.random() * 10_000);
-    setBusy(true);
+
+    const params = {
+      model_id: "stabilityai/sd-turbo",
+      prompt: finalPrompt.trim(),
+      prompt_interpolation_method: "slerp",
+      normalize_prompt_weights: true,
+      normalize_seed_weights: true,
+      negative_prompt: "blurry, low quality, flat, 2d",
+      num_inference_steps: 50,
+      seed,
+      t_index_list: [0, 8, 17],
+      controlnets: [
+        {
+          conditioning_scale: 0.22,
+          control_guidance_end: 1,
+          control_guidance_start: 0,
+          enabled: true,
+          model_id: "thibaud/controlnet-sd21-openpose-diffusers",
+          preprocessor: "pose_tensorrt",
+          preprocessor_params: {},
+        },
+        {
+          conditioning_scale: 0.2,
+          control_guidance_end: 1,
+          control_guidance_start: 0,
+          enabled: true,
+          model_id: "thibaud/controlnet-sd21-hed-diffusers",
+          preprocessor: "soft_edge",
+          preprocessor_params: {},
+        },
+        {
+          conditioning_scale: 0.2,
+          control_guidance_end: 1,
+          control_guidance_start: 0,
+          enabled: true,
+          model_id: "thibaud/controlnet-sd21-canny-diffusers",
+          preprocessor: "canny",
+          preprocessor_params: { high_threshold: 200, low_threshold: 100 },
+        },
+        {
+          conditioning_scale: 0.2,
+          control_guidance_end: 1,
+          control_guidance_start: 0,
+          enabled: true,
+          model_id: "thibaud/controlnet-sd21-depth-diffusers",
+          preprocessor: "depth_tensorrt",
+          preprocessor_params: {},
+        },
+        {
+          conditioning_scale: 0.2,
+          control_guidance_end: 1,
+          control_guidance_start: 0,
+          enabled: true,
+          model_id: "thibaud/controlnet-sd21-color-diffusers",
+          preprocessor: "passthrough",
+          preprocessor_params: {},
+        },
+      ],
+    };
+
     try {
-      const res = await fetch(`https://api.daydream.live/v1/streams/${stream.id}`, {
+      console.log("🚀 Sending prompt:", params);
+      const res = await fetch(`https://api.daydream.live/v1/streams/${currentStream.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${API_KEY}`,
         },
-        body: JSON.stringify({
-          params: {
-            model_id: "stabilityai/sd-turbo",
-            prompt: finalPrompt,
-            negative_prompt: "blurry, low quality, flat, 2d",
-            num_inference_steps: 40,
-            seed,
-            width: 1920,
-            height: 1080,
-          },
-        }),
+        body: JSON.stringify({ params }),
       });
 
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
-      }
-
-      console.log("✅ Prompt sent:", finalPrompt);
+      const text = await res.text();
+      if (!res.ok) throw new Error(`Daydream ${res.status}: ${text}`);
+      console.log("✅ Prompt applied successfully:", finalPrompt);
       setGeneratedPrompt(finalPrompt);
-    } catch (e) {
-      console.error(e);
-      setError("Failed to send prompt to Daydream");
+    } catch (err) {
+      console.error("❌ Daydream error:", err);
+      setError("Daydream API failed. Recreating stream...");
+      setStream(null);
+      await createStream();
     } finally {
       setBusy(false);
     }
   };
 
-  // manual visual prompt submit
+  // --- manual prompt submission ---
   const handlePromptSubmit = async (base: string) => {
     if (!base.trim()) return setError("Enter a prompt first.");
     const merged = generatePrompt(base, mode);
     await sendPromptToDaydream(merged);
   };
+
+  // --- song -> fal-ai -> daydream ---
+  const fetchSongVisualContext = async () => {
+    if (!songPrompt.trim()) return setError("Enter a song name first.");
+    setBusy(true);
+    setError(null);
+  
+    try {
+      const result = await fal.subscribe("openrouter/router", {
+        input: {
+          prompt: `
+  You are a world-class music video and visual culture expert trained on the global catalogue of songs, music videos, and stage performances from every era.
+  
+  When given a song, you will:
+  1. Identify its release period, cultural and visual trends at that time.
+  2. Recall or infer the actual *music video’s* visual themes, lighting, wardrobe, set design, and color palette.
+  3. Identify the genre's defining visual language (e.g., 90s teen pop, early 2000s R&B, synthwave 80s revival, etc.).
+  4. Construct a cinematic generative prompt that recreates that visual *atmosphere* faithfully — using filmic terms, lighting descriptors, and compositional language.
+  
+  Rules:
+  - Base your description on factual knowledge and real music video references if available.
+  - Avoid literal lyric interpretations.
+  - Do not name the artist or song in the output.
+  - Focus on describing the visual world so a diffusion model could recreate it.
+  
+  Song: "${songPrompt}"
+  
+  Respond only with the final cinematic prompt, no explanations.
+          `,
+          model: "anthropic/claude-3.5-sonnet",
+          temperature: 0.4, // lower for factual accuracy
+          max_tokens: 300,
+        },
+      });
+  
+      const output = result.data?.output?.trim() ?? "";
+      console.log("🎬 Claude factual visual prompt:", output);
+  
+      // Send directly to Daydream (no UI echo)
+      if (output) await sendPromptToDaydream(output);
+      else setError("Claude returned no visual data.");
+    } catch (e) {
+      console.error("❌ Fal AI error:", e);
+      setError("Failed to generate factual song visuals.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  
 
   return (
     <main
@@ -193,18 +292,18 @@ export default function Home() {
         padding: 0,
         height: "100vh",
         width: "100vw",
-        position: "relative",
-        fontFamily: "Inter, sans-serif",
         background: "#000",
         color: "#fff",
+        position: "relative",
+        fontFamily: "Inter, sans-serif",
         overflow: "hidden",
       }}
     >
       {!isFullscreen && (
-        <div style={{ padding: 20, position: "relative", zIndex: 2 }}>
+        <div style={{ padding: 20, zIndex: 2, position: "relative" }}>
           <h1>🎛 VPM PRO — Mode: <strong>{mode.toUpperCase()}</strong></h1>
 
-          {/* Mode buttons */}
+          {/* mode buttons */}
           <div style={{ marginBottom: 20 }}>
             {modes.map((m) => (
               <button
@@ -240,7 +339,7 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Box 1: Manual visual prompt */}
+          {/* manual prompt box */}
           <div style={{ marginBottom: 25 }}>
             <h3>🎨 Manual Visual Prompt</h3>
             <input
@@ -273,7 +372,7 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Box 2: Song → LLM → Daydream */}
+          {/* song to AI */}
           <div style={{ marginBottom: 25 }}>
             <h3>🎵 Song to Visual AI</h3>
             <input
@@ -322,7 +421,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* Preset buttons */}
+          {/* preset buttons */}
           <div style={{ display: "flex", flexWrap: "wrap", marginBottom: 20 }}>
             {tags.map((tag) => (
               <button
@@ -361,7 +460,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Fullscreen Display */}
+      {/* fullscreen display */}
       <div
         ref={containerRef}
         style={{
