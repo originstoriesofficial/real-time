@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.7.2",
     "@livepeer/react": "^4.3.6",
     "@livepeer/sdk": "^1.0.1-alpha.10",
     "next": "15.4.6",
