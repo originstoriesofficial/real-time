@@ -8,12 +8,11 @@ fal.config({
   credentials: process.env.NEXT_PUBLIC_FAL_KEY || "",
 });
 
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY!;
 const DEFAULT_PIPELINE = "pip_SD-turbo";
-
 const modes = ["dj", "karaoke", "live"] as const;
 type Mode = (typeof modes)[number];
 
+// --- TAG PRESETS ---
 const djMoods = ["fire", "ocean", "neon", "forest", "sunset"];
 const karaokeGenres = [
   "90s brit pop",
@@ -41,7 +40,7 @@ const liveTags = [
   "dreamy concert",
 ];
 
-// --- Helpers ---
+// --- HELPER: build styled prompt ---
 function generatePrompt(base: string, mode: Mode) {
   const styles = [
     "award-winning cinematic, 3D, vibrant monochromatic, crystallized, 4k",
@@ -104,16 +103,13 @@ export default function Home() {
     return liveTags;
   }, [mode]);
 
-  // --- CREATE STREAM ---
+  // --- CREATE STREAM (via proxy) ---
   const createStream = async (pipelineId = DEFAULT_PIPELINE) => {
     try {
       console.log("🎥 Creating new stream...");
-      const res = await fetch("https://api.daydream.live/v1/streams", {
+      const res = await fetch("/api/daydream/streams", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${API_KEY}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pipeline_id: pipelineId }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -136,10 +132,9 @@ export default function Home() {
     if (!stream) createStream();
   }, []);
 
-  // --- SEND PROMPT TO DAYDREAM ---
+  // --- SEND PROMPT TO DAYDREAM (via proxy) ---
   const sendPromptToDaydream = async (finalPrompt: string) => {
     if (!finalPrompt?.trim()) return setError("Prompt is empty.");
-    if (!API_KEY) return setError("Missing Daydream API key.");
 
     let currentStream = stream;
     if (!currentStream) {
@@ -187,17 +182,11 @@ export default function Home() {
 
     try {
       console.log("🚀 Sending prompt:", params);
-      const res = await fetch(
-        `https://api.daydream.live/v1/streams/${currentStream.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${API_KEY}`,
-          },
-          body: JSON.stringify({ params }),
-        }
-      );
+      const res = await fetch(`/api/daydream/streams/${currentStream.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ params }),
+      });
       const text = await res.text();
       if (!res.ok) throw new Error(`Daydream ${res.status}: ${text}`);
       console.log("✅ Prompt applied successfully.");
