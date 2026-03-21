@@ -14,13 +14,18 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
    ============================================================ */
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY!;
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY!;
-const DEFAULT_PIPELINE = "pip_SD-turbo";
+const DEFAULT_PIPELINE = "streamdiffusion";
+// Add this state
 
 const modes = ["dj", "performance", "live"] as const;
 type Mode = (typeof modes)[number];
 type RenderEngine = "LIVE" | "ABSTRACT";
-type StreamData = { id: string; playbackId: string; whipUrl: string };
-
+type StreamData = {
+  id: string;
+  playbackId: string;
+  whipUrl: string;
+  gatewayHost: string;
+};
 /* ============================================================
    TAG BANKS
    ============================================================ */
@@ -205,6 +210,7 @@ export default function Home() {
   const [lastPrompt, setLastPrompt] = useState<string>("");
   const [stream, setStream] = useState<StreamData | null>(null);
   const [obsConfirmed, setObsConfirmed] = useState(false);
+  const [obsStreaming, setObsStreaming] = useState(false);
   const [copied, setCopied] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -232,54 +238,59 @@ export default function Home() {
   /* ============================================================
      STREAM CREATION
      ============================================================ */
-  const createStream = async (pipelineId = DEFAULT_PIPELINE): Promise<StreamData | null> => {
-    try {
-      console.log("🎥 Creating new stream...");
-      const res = await fetch("https://api.daydream.live/v1/streams", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${API_KEY}` },
-        body: JSON.stringify({
-          pipeline_id: pipelineId,
-          pipeline_params: {
-            width: 896,
-            height: 512,
-            model_id: "stabilityai/sd-turbo",
-            guidance_scale: 1,
-            num_inference_steps: 40,
-            delta: 0.4,
-            t_index_list: [0, 10, 20],
-            enable_similar_image_filter: true,
-            similar_image_filter_max_skip_frame: 8,
-            similar_image_filter_threshold: 0.98,
-            negative_prompt: "blurry, low quality, flat, 2d",
-          },
-        }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      const streamData: StreamData = {
-        id: data.id,
-        playbackId: data.output_playback_id,
-        whipUrl: data.whip_url,
-      };
-      setStream(streamData);
-      console.log("%c━━━ VPM PRO STREAM READY ━━━", "color: #00ffaa; font-weight: bold");
-      console.log("%c🎥 OBS WHIP URL", "color: #ffaa00; font-weight: bold", streamData.whipUrl);
-      console.log("%c📺 Playback ID ", "color: #aaaaff; font-weight: bold", streamData.playbackId);
-      console.log("%c🆔 Stream ID   ", "color: #888888", streamData.id);
-      console.log("%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "color: #00ffaa");
-      return streamData;
-    } catch (err) {
-      console.error("❌ Stream creation failed:", err);
-      setError("Stream creation failed. Check API key or connection.");
-      return null;
-    }
-  };
+const createStream = async (): Promise<StreamData | null> => {
+  try {
+    const res = await fetch("https://api.daydream.live/v1/streams", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({
+        pipeline: "streamdiffusion",
+        params: {
+          model_id: "stabilityai/sd-turbo",
+          prompt: "live performance",
 
-  /* ── On mount: always create a fresh stream ── */
-  useEffect(() => {
-    void createStream();
-  }, []);
+          width: 896,
+          height: 512,
+
+          num_inference_steps: 50,
+          guidance_scale: 1,
+          delta: 0.4,
+          t_index_list: [0, 10, 20],
+        },
+      }),
+    });
+
+    if (!res.ok) throw new Error(await res.text());
+
+    const data = await res.json();
+
+    const streamData: StreamData = {
+      id: data.id,
+      playbackId: data.output_playback_id,
+      whipUrl: data.whip_url,
+      gatewayHost: data.gateway_host, // keep but don’t use
+    };
+
+    setStream(streamData);
+
+    console.log("✅ Stream ready");
+    console.log("WHIP:", streamData.whipUrl);
+
+    return streamData;
+
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+};
+
+/* ── On mount: always create a fresh stream ── */
+useEffect(() => {
+  void createStream();
+}, []);
 
 
   /* ============================================================
@@ -625,12 +636,12 @@ Format the response as one descriptive line, e.g.:
         backgroundColor: "#000", zIndex: 1,
       }}>
         <div style={{ position: "relative", width: "100%", paddingTop: "56.25%", overflow: "hidden" }}>
-          {stream?.playbackId && (
-            <iframe
-              src={`https://lvpr.tv/?v=${stream.playbackId}&embed=1&lowLatency=force`}
-              style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
-              allow="autoplay; encrypted-media; fullscreen; picture-in-picture; camera; microphone"
-              allowFullScreen
+        {stream?.playbackId && obsStreaming && (
+  <iframe
+    src={`https://lvpr.tv/?v=${stream.playbackId}&embed=1&lowLatency=force`}
+    style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
+    allow="autoplay; encrypted-media; fullscreen; picture-in-picture; camera; microphone"
+    allowFullScreen
             />
           )}
         </div>
@@ -731,8 +742,12 @@ Format the response as one descriptive line, e.g.:
             </div>
 
             {/* CONFIRM BUTTON */}
-            <button
-              onClick={() => setObsConfirmed(true)}
+           <button
+  onClick={() => {
+    setObsConfirmed(true);
+    setObsStreaming(true);  // user confirms OBS is actively streaming
+  }} // user confirms OBS is actively streaming
+
               disabled={!stream}
               style={{
                 width: "100%", padding: "14px",
