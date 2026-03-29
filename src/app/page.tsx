@@ -54,29 +54,32 @@ type SpeedSettings = {
   t_index_list: number[];
   guidance_scale: number;
 };
+type PlaybackSource = {
+  type?: string;
+  url?: string;
+};
+
+type PlaybackResponse = {
+  meta?: {
+    source?: PlaybackSource[];
+  };
+};
 
 async function getPlaybackUrl(playbackId: string): Promise<string | null> {
   try {
-    const res = await fetch(
-      `https://livepeer.studio/api/playback/${playbackId}`
-    );
-
+    const res = await fetch(`https://livepeer.studio/api/playback/${playbackId}`);
     if (!res.ok) throw new Error("Failed to fetch playback");
 
-    const data = await res.json();
+    const data: PlaybackResponse = await res.json();
 
-    // ✅ prefer WebRTC (low latency)
     const webrtc = data.meta?.source?.find(
-      (s: any) => s.type === "html5/video/h264"
+      (source) => source.type === "html5/video/h264"
     );
-
     if (webrtc?.url) return webrtc.url;
 
-    // ✅ fallback to HLS (more stable)
     const hls = data.meta?.source?.find(
-      (s: any) => s.type === "html5/application/vnd.apple.mpegurl"
+      (source) => source.type === "html5/application/vnd.apple.mpegurl"
     );
-
     if (hls?.url) return hls.url;
 
     return null;
@@ -347,11 +350,7 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
     if (!res.ok) throw new Error(await res.text());
 
     const data = await res.json();
-
-    // ✅ enforce HTTPS (source of truth)
     const whipUrl = String(data.whipUrl || "").replace(/^http:/, "https:");
-
-    // ✅ LOG HERE (correct)
     console.log("WHIP URL (after fetch):", whipUrl);
 
     const streamData: StreamData = {
@@ -360,14 +359,10 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
       whipUrl,
     };
 
-    setStream(streamData);
+    setStream(streamData); // ✅ put this back
     return streamData;
-
   } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : "Failed to create stream.";
-
-    setError(message);
+    console.error(err);
     return null;
   }
 }, []);
@@ -394,10 +389,13 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
       setCameraStarted(true);
       if (localVideoRef.current) localVideoRef.current.srcObject = mediaStream;
 
-const broadcast = createBroadcast({
-  whipUrl: forceHttps(s.whipUrl),
-  stream: mediaStream,
+const safeWhip = forceHttps(s.whipUrl);
 
+console.log("FINAL WHIP USED:", safeWhip);
+
+const broadcast = createBroadcast({
+  whipUrl: safeWhip,
+  stream: mediaStream,
   reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
 });
 
@@ -408,27 +406,19 @@ setBroadcastState("connecting");
 // helper
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-async function waitForWhep(b: ReturnType<typeof createBroadcast>) {
-  for (let i = 0; i < 10; i++) {
-    if (b.whepUrl) return b.whepUrl;
-    await sleep(1000);
-  }
-  throw new Error("WHEP not ready");
-}
 
 broadcast.on("stateChange", async (state: BroadcastState) => {
   console.log("Broadcast:", state);
   setBroadcastState(state);
 
   // ✅ only init once + only when live
-  if (state !== "live" || playerRef.current || !stream?.playbackId) return;
+if (state !== "live" || playerRef.current || !s?.playbackId) return;
 
   try {
     // ✅ small delay → playback becomes available
     await sleep(1000);
 
-    const url = await getPlaybackUrl(stream.playbackId);
-
+const url = await getPlaybackUrl(s.playbackId);
     if (!url) throw new Error("No playback URL");
 
     const player = createPlayer(url, {
@@ -475,8 +465,7 @@ broadcast.on("stateChange", async (state: BroadcastState) => {
     playerRef.current = null;
   }
 });
-// start AFTER listeners
-await broadcast.connect();
+
 
 broadcast.on("error", (err: Error) => {
   console.error("Broadcast error:", err);
@@ -583,29 +572,29 @@ const sendPromptToDaydream = useCallback(async (finalPrompt: string) => {
   /* ============================================================
      RETURN TO LIVE
      ============================================================ */
-  const returnToLiveMode = async () => {
-    if (!stream) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`https://api.daydream.live/v1/streams/${stream.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${API_KEY}` },
-        body: JSON.stringify({ pipeline: "streamdiffusion", params: null }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      setIsLiveMode(true);
-      setLastPrompt("");
-   } catch (err: unknown) {
-  const message =
-    err instanceof Error
-      ? err.message
-      : "Failed to return to live mode.";
+const returnToLiveMode = async () => {
+  if (!stream) return;
+  setBusy(true);
 
-  setError(message);
-} finally {
-  setBusy(false);
-}
-  };
+  try {
+    const res = await fetch("/api/daydream/return-live", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ streamId: stream.id }),
+    });
+
+    if (!res.ok) throw new Error(await res.text());
+
+    setIsLiveMode(true);
+    setLastPrompt("");
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "Failed to return to live mode.";
+    setError(message);
+  } finally {
+    setBusy(false);
+  }
+};
 
   /* ============================================================
      QUESTIONNAIRE + GEMINI
