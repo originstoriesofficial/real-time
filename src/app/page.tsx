@@ -364,45 +364,64 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
       setCameraStarted(true);
       if (localVideoRef.current) localVideoRef.current.srcObject = mediaStream;
 
-      const broadcast = createBroadcast({
-        whipUrl: s.whipUrl,
-        stream: mediaStream,
-        reconnect: {  enabled: true,
-  maxAttempts: 10,
-  baseDelayMs: 2000,  },
+const broadcast = createBroadcast({
+  whipUrl: forceHttps(s.whipUrl),
+  stream: mediaStream,
+  reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
 });
 
-      broadcastRef.current = broadcast;
-      setBroadcastState("connecting");
+broadcastRef.current = broadcast;
+setBroadcastState("connecting");
+
+// ✅ helper OUTSIDE
+async function waitForWhep(b: ReturnType<typeof createBroadcast>) {
+  for (let i = 0; i < 10; i++) {
+    if (b.whepUrl) return b.whepUrl;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  throw new Error("WHEP not ready");
+}
 
 broadcast.on("stateChange", async (state: BroadcastState) => {
   console.log("Broadcast:", state);
   setBroadcastState(state);
 
-  if (state === "live" && broadcast.whepUrl && !playerRef.current) {
-    await new Promise(r => setTimeout(r, 3000));
+  if (state === "live" && !playerRef.current) {
+    try {
+      const whepUrl = await waitForWhep(broadcast);
 
-    const player = createPlayer(broadcast.whepUrl, {
-      reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
-    });
+      const player = createPlayer(forceHttps(whepUrl), {
+        reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
+      });
 
-    playerRef.current = player;
-player.on("stateChange", (ps: PlayerState) => {
-  console.log("Player:", ps);
-  setPlayerState(ps);
-});
+      playerRef.current = player;
 
-player.on("error", (err: Error) => {
-  console.error("Player error:", err);
-  setPlayerState("error");
-  setError(err.message || "Playback error.");
-});
+      player.on("stateChange", (ps: PlayerState) => {
+        console.log("Player:", ps);
+        setPlayerState(ps);
+      });
 
-    await player.connect();
+      player.on("error", (err: Error) => {
+        console.error("Player error:", err);
+        setPlayerState("error");
+        setError(err.message || "Playback error.");
+      });
+try {
+  await player.connect();
+} catch {
+  console.warn("Player connect failed, retrying...");
+  await new Promise(r => setTimeout(r, 2000));
+  await player.connect();
+}
 
-    if (outputVideoRef.current) {
-      player.attachTo(outputVideoRef.current);
-      await outputVideoRef.current.play().catch(() => {});
+      if (outputVideoRef.current) {
+        player.attachTo(outputVideoRef.current);
+        await outputVideoRef.current.play().catch(() => {});
+      }
+
+    } catch (err: unknown) {
+      console.error("Player setup failed:", err);
+      setError(err instanceof Error ? err.message : "Player failed");
     }
   }
 });
