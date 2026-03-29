@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@daydreamlive/browser": "^0.3.2",
+    "@daydreamlive/react": "^0.3.2",
     "@daydreamlive/sdk": "^0.1.1",
     "@fal-ai/client": "^1.7.2",
     "@livepeer/react": "^4.3.6",
