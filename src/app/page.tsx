@@ -63,34 +63,41 @@ type PlaybackResponse = {
     source?: PlaybackSource[];
   };
 };
-async function getPlaybackUrl(playbackId: string): Promise<string | null> {
-  try {
-    const res = await fetch(`https://livepeer.studio/api/playback/${playbackId}`);
-    if (!res.ok) throw new Error("Failed to fetch playback");
+async function getPlaybackUrlWithRetry(playbackId: string): Promise<string | null> {
+  for (let i = 0; i < 6; i++) {
+    try {
+      const res = await fetch(`https://livepeer.studio/api/playback/${playbackId}`);
+      if (!res.ok) throw new Error("Playback fetch failed");
 
-    const data = await res.json();
+      const data = await res.json();
 
-    console.log("PLAYBACK META:", data.meta);
+      console.log("PLAYBACK SOURCES:", data.meta?.source);
 
-    // ✅ TRUE WebRTC (WHEP)
-    const webrtc = data.meta?.source?.find(
-      (s: any) => s.type === "webrtc"
-    );
+      // ✅ WebRTC (low latency)
+      const webrtc = data.meta?.source?.find(
+        (s: any) => s.type === "webrtc"
+      );
 
-    if (webrtc?.url) return webrtc.url;
+      if (webrtc?.url) return webrtc.url;
 
-    // ✅ fallback to HLS (IMPORTANT)
-    const hls = data.meta?.source?.find(
-      (s: any) => s.type === "hls"
-    );
+      // ✅ HLS fallback (important)
+      const hls = data.meta?.source?.find(
+        (s: any) =>
+          s.type === "hls" ||
+          s.type === "html5/application/vnd.apple.mpegurl"
+      );
 
-    if (hls?.url) return hls.url;
+      if (hls?.url) return hls.url;
 
-    return null;
-  } catch (err) {
-    console.error("Playback fetch error:", err);
-    return null;
+    } catch (err) {
+      console.warn("Playback retry failed:", err);
+    }
+
+    // ⏳ wait before retry
+    await new Promise(r => setTimeout(r, 1500));
   }
+
+  return null;
 }
 /* ============================================================
    UTILS
@@ -422,8 +429,7 @@ if (state !== "live" || playerRef.current || !s?.playbackId) return;
     // ✅ small delay → playback becomes available
     await sleep(2500);
 
-const url = await getPlaybackUrl(s.playbackId);
-    if (!url) throw new Error("No playback URL");
+const url = await getPlaybackUrlWithRetry(s.playbackId);    if (!url) throw new Error("No playback URL");
 
     const player = createPlayer(url, {
       reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
