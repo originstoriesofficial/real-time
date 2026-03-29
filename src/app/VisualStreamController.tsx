@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 
 type VisualStreamControllerProps = {
-    updateStream: (params: any) => Promise<void>;
+  updateStream: (params: Record<string, unknown>) => Promise<void>;
   };
   
   export function VisualStreamController({ updateStream }: VisualStreamControllerProps) {
