@@ -20,7 +20,6 @@ import { createBroadcast, createPlayer } from "@daydreamlive/browser";
    ============================================================ */
 const API_KEY = process.env.DAYDREAM_API_KEY ?? "";
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
-const MODEL_ID = "stabilityai/sd-turbo";
 
 const MODES = ["dj", "performance", "live"] as const;
 type Mode = (typeof MODES)[number];
