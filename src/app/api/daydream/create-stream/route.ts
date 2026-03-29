@@ -1,3 +1,5 @@
+// /app/api/daydream/create-stream/route.ts
+
 import { NextResponse } from "next/server";
 
 export async function POST() {
@@ -12,24 +14,21 @@ export async function POST() {
       params: {
         model_id: "stabilityai/sd-turbo",
         prompt: "live performance",
-        width: 512,
-        height: 512,
-        num_inference_steps: 25,
-        guidance_scale: 1,
-        delta: 0.7,
-        t_index_list: [12, 20, 24],
       },
     }),
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    return NextResponse.json({ error: text }, { status: 500 });
+    return NextResponse.json(
+      { error: await res.text() },
+      { status: 500 }
+    );
   }
 
-  const data = await res.json(); // ✅ FIXED (was "esponse")
+  const data = await res.json();
 
-  const whipUrl = String(data.whip_url || "").replace(/^http:/, "https:");
+  // ✅ FORCE HTTPS HERE (critical)
+  const whipUrl = data.whip_url.replace(/^http:/, "https:");
 
   return NextResponse.json({
     id: data.id,

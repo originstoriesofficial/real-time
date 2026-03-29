@@ -61,15 +61,27 @@ async function getPlaybackUrl(playbackId: string): Promise<string | null> {
       `https://livepeer.studio/api/playback/${playbackId}`
     );
 
+    if (!res.ok) throw new Error("Failed to fetch playback");
+
     const data = await res.json();
 
+    // ✅ prefer WebRTC (low latency)
     const webrtc = data.meta?.source?.find(
-      (s: any) => s.hrn === "WebRTC (H264)"
+      (s: any) => s.type === "html5/video/h264"
     );
 
-    return webrtc?.url ?? null;
+    if (webrtc?.url) return webrtc.url;
+
+    // ✅ fallback to HLS (more stable)
+    const hls = data.meta?.source?.find(
+      (s: any) => s.type === "html5/application/vnd.apple.mpegurl"
+    );
+
+    if (hls?.url) return hls.url;
+
+    return null;
   } catch (err) {
-    console.error("Failed to fetch playback URL", err);
+    console.error("Playback fetch error:", err);
     return null;
   }
 }
@@ -336,12 +348,11 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
 
     const data = await res.json();
 
-    // ✅ enforce HTTPS ONCE (source of truth)
+    // ✅ enforce HTTPS (source of truth)
     const whipUrl = String(data.whipUrl || "").replace(/^http:/, "https:");
 
-    if (!data.id || !whipUrl) {
-      throw new Error("Invalid stream response");
-    }
+    // ✅ LOG HERE (correct)
+    console.log("WHIP URL (after fetch):", whipUrl);
 
     const streamData: StreamData = {
       id: String(data.id),
@@ -360,7 +371,6 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
     return null;
   }
 }, []);
-
   /* ============================================================
      CAMERA START
      ============================================================ */
@@ -387,8 +397,10 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
 const broadcast = createBroadcast({
   whipUrl: forceHttps(s.whipUrl),
   stream: mediaStream,
+
   reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
 });
+
 
 broadcastRef.current = broadcast;
 setBroadcastState("connecting");
