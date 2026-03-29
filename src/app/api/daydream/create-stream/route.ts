@@ -1,12 +1,11 @@
-// ✅ FIX — MOVE STREAM CREATION TO BACKEND
+import { NextResponse } from "next/server";
 
-// /app/api/daydream/create-stream/route.ts
 export async function POST() {
   const res = await fetch("https://api.daydream.live/v1/streams", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.DAYDREAM_API_KEY}`, // ✅ server only
+      Authorization: `Bearer ${process.env.DAYDREAM_API_KEY}`,
     },
     body: JSON.stringify({
       pipeline: "streamdiffusion",
@@ -23,11 +22,18 @@ export async function POST() {
     }),
   });
 
-  const data = await res.json();
+  if (!res.ok) {
+    const text = await res.text();
+    return NextResponse.json({ error: text }, { status: 500 });
+  }
 
-  return Response.json({
+  const data = await res.json(); // ✅ FIXED (was "esponse")
+
+  const whipUrl = String(data.whip_url || "").replace(/^http:/, "https:");
+
+  return NextResponse.json({
     id: data.id,
+    whipUrl,
     playbackId: data.output_playback_id,
-    whipUrl: data.whip_url,
   });
 }

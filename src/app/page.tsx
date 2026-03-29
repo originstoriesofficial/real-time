@@ -318,27 +318,29 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
 
     const data = await res.json();
 
-    const streamData: StreamData = {
-      id: String(data.id),
-      playbackId: String(data.playbackId ?? ""),
-      whipUrl: forceHttps(data.whipUrl ?? ""),
-    };
+    // ✅ enforce HTTPS ONCE (source of truth)
+    const whipUrl = String(data.whipUrl || "").replace(/^http:/, "https:");
 
-    if (!streamData.id || !streamData.whipUrl) {
+    if (!data.id || !whipUrl) {
       throw new Error("Invalid stream response");
     }
 
+    const streamData: StreamData = {
+      id: String(data.id),
+      playbackId: String(data.playbackId ?? ""),
+      whipUrl,
+    };
+
     setStream(streamData);
     return streamData;
-  } catch (err: unknown) {
-  const message =
-    err instanceof Error
-      ? err.message
-      : "Failed to create stream.";
 
-  setError(message);
-  return null;
-}
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "Failed to create stream.";
+
+    setError(message);
+    return null;
+  }
 }, []);
 
   /* ============================================================
@@ -373,11 +375,13 @@ const broadcast = createBroadcast({
 broadcastRef.current = broadcast;
 setBroadcastState("connecting");
 
-// ✅ helper OUTSIDE
+// helper
+const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
 async function waitForWhep(b: ReturnType<typeof createBroadcast>) {
   for (let i = 0; i < 10; i++) {
     if (b.whepUrl) return b.whepUrl;
-    await new Promise(r => setTimeout(r, 1000));
+    await sleep(1000);
   }
   throw new Error("WHEP not ready");
 }
@@ -386,45 +390,56 @@ broadcast.on("stateChange", async (state: BroadcastState) => {
   console.log("Broadcast:", state);
   setBroadcastState(state);
 
-  if (state === "live" && !playerRef.current) {
+  // only init once
+  if (state !== "live" || playerRef.current) return;
+
+  try {
+    const whepUrl = await waitForWhep(broadcast);
+
+    const player = createPlayer(forceHttps(whepUrl), {
+      reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
+    });
+
+    playerRef.current = player;
+
+    player.on("stateChange", (ps: PlayerState) => {
+      console.log("Player:", ps);
+      setPlayerState(ps);
+    });
+
+    player.on("error", (err: Error) => {
+      console.error("Player error:", err);
+      setPlayerState("error");
+      setError(err.message || "Playback error.");
+    });
+
+    // connect with retry
     try {
-      const whepUrl = await waitForWhep(broadcast);
-
-      const player = createPlayer(forceHttps(whepUrl), {
-        reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
-      });
-
-      playerRef.current = player;
-
-      player.on("stateChange", (ps: PlayerState) => {
-        console.log("Player:", ps);
-        setPlayerState(ps);
-      });
-
-      player.on("error", (err: Error) => {
-        console.error("Player error:", err);
-        setPlayerState("error");
-        setError(err.message || "Playback error.");
-      });
-try {
-  await player.connect();
-} catch {
-  console.warn("Player connect failed, retrying...");
-  await new Promise(r => setTimeout(r, 2000));
-  await player.connect();
-}
-
-      if (outputVideoRef.current) {
-        player.attachTo(outputVideoRef.current);
-        await outputVideoRef.current.play().catch(() => {});
-      }
-
-    } catch (err: unknown) {
-      console.error("Player setup failed:", err);
-      setError(err instanceof Error ? err.message : "Player failed");
+      await player.connect();
+    } catch (err) {
+      console.warn("Player connect failed, retrying...");
+      await sleep(2000);
+      await player.connect();
     }
+
+    // attach safely
+    const video = outputVideoRef.current;
+    if (video) {
+      player.attachTo(video);
+      await video.play().catch(() => {});
+    }
+
+  } catch (err: unknown) {
+    console.error("Player setup failed:", err);
+    setError(err instanceof Error ? err.message : "Player failed");
+
+    // reset so it can retry on next "live"
+    playerRef.current = null;
   }
 });
+
+// start AFTER listeners
+await broadcast.connect();
 
 broadcast.on("error", (err: Error) => {
   console.error("Broadcast error:", err);
