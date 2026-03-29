@@ -76,10 +76,14 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true });
-  } catch (err: any) {
-    console.error("❌ update-stream failed:", err);
-    return new NextResponse(err?.message || "Server error", {
-      status: 500,
-    });
-  }
+ } catch (err: unknown) {
+  console.error("❌ update-stream failed:", err);
+
+  const message =
+    err instanceof Error ? err.message : "Server error";
+
+  return new NextResponse(message, {
+    status: 500,
+  });
+}
 }

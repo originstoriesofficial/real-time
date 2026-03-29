@@ -297,7 +297,11 @@ export default function Home() {
     const el = containerRef.current;
     if (!el) return;
     if (el.requestFullscreen) { void el.requestFullscreen(); return; }
-    (el as any).webkitRequestFullscreen?.();
+  interface WebkitFullscreenElement extends HTMLElement {
+  webkitRequestFullscreen?: () => Promise<void>;
+}
+
+(el as WebkitFullscreenElement).webkitRequestFullscreen?.();
   }, []);
 
   /* ============================================================
@@ -326,10 +330,15 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
 
     setStream(streamData);
     return streamData;
-  } catch (err: any) {
-    setError(err?.message || "Failed to create stream.");
-    return null;
-  }
+  } catch (err: unknown) {
+  const message =
+    err instanceof Error
+      ? err.message
+      : "Failed to create stream.";
+
+  setError(message);
+  return null;
+}
 }, []);
 
   /* ============================================================
@@ -366,53 +375,57 @@ const createStream = useCallback(async (): Promise<StreamData | null> => {
       broadcastRef.current = broadcast;
       setBroadcastState("connecting");
 
-      broadcast.on("stateChange", async (state: any) => {
+broadcast.on("stateChange", async (state: BroadcastState) => {
+  console.log("Broadcast:", state);
   setBroadcastState(state);
 
   if (state === "live" && broadcast.whepUrl && !playerRef.current) {
-    // Wait for WHEP endpoint to become available
     await new Promise(r => setTimeout(r, 3000));
 
     const player = createPlayer(broadcast.whepUrl, {
-      reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000},
+      reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
     });
 
-          playerRef.current = player;
+    playerRef.current = player;
+player.on("stateChange", (ps: PlayerState) => {
+  console.log("Player:", ps);
+  setPlayerState(ps);
+});
 
-          player.on("stateChange", (ps: any) => {
-            console.log("Player:", ps);
-            setPlayerState(ps);
-          });
+    player.on("error", (err: Error) => {
+      console.error("Player error:", err);
+      setPlayerState("error");
+      setError(err?.message || "Playback error.");
+    });
 
-          player.on("error", (err: any) => {
-            console.error("Player error:", err);
-            setPlayerState("error");
-            setError(err?.message || "Playback error.");
-          });
+    await player.connect();
 
-          await player.connect();
-
-          if (outputVideoRef.current) {
-            player.attachTo(outputVideoRef.current);
-            await outputVideoRef.current.play().catch(() => {});
-          }
-        }
-      });
-
-      broadcast.on("error", (err: any) => {
-        console.error("Broadcast error:", err);
-        setBroadcastState("error");
-        setError(err?.message || "Broadcast error.");
-      });
-
-      await broadcast.connect();
-    } catch (err: any) {
-      console.error("❌ startCamera failed:", err);
-      setError(err?.message || "Failed to start camera.");
-      setBroadcastState("error");
-    } finally {
-      setBusy(false);
+    if (outputVideoRef.current) {
+      player.attachTo(outputVideoRef.current);
+      await outputVideoRef.current.play().catch(() => {});
     }
+  }
+});
+
+broadcast.on("error", (err: Error) => {
+  console.error("Broadcast error:", err);
+  setBroadcastState("error");
+  setError(err?.message || "Broadcast error.");
+});
+      await broadcast.connect();
+   } catch (err: unknown) {
+  console.error("❌ startCamera failed:", err);
+
+  const message =
+    err instanceof Error
+      ? err.message
+      : "Failed to start camera.";
+
+  setError(message);
+  setBroadcastState("error");
+} finally {
+  setBusy(false);
+}
   };
 
   /* ============================================================
@@ -466,12 +479,18 @@ const sendPromptToDaydream = useCallback(async (finalPrompt: string) => {
 
     if (!res.ok) throw new Error(await res.text());
     console.log(`✅ [${renderEngine}] Prompt applied`);
-  } catch (err: any) {
-    console.error("❌ Prompt failed:", err);
-    setError(err?.message || "Failed to update stream.");
-  } finally {
-    setBusy(false);
-  }
+} catch (err: unknown) {
+  console.error("❌ Prompt failed:", err);
+
+  const message =
+    err instanceof Error
+      ? err.message
+      : "Failed to update stream.";
+
+  setError(message);
+} finally {
+  setBusy(false);
+}
 }, [stream, renderEngine, motionSpeed]);
   /* ── Prompt submit ── */
   const handlePromptSubmit = useCallback(async (base: string) => {
@@ -505,11 +524,16 @@ const sendPromptToDaydream = useCallback(async (finalPrompt: string) => {
       if (!res.ok) throw new Error(await res.text());
       setIsLiveMode(true);
       setLastPrompt("");
-    } catch (err: any) {
-      setError(err?.message || "Failed to return to live mode.");
-    } finally {
-      setBusy(false);
-    }
+   } catch (err: unknown) {
+  const message =
+    err instanceof Error
+      ? err.message
+      : "Failed to return to live mode.";
+
+  setError(message);
+} finally {
+  setBusy(false);
+}
   };
 
   /* ============================================================
@@ -589,14 +613,24 @@ Return exactly 5 lines.`,
           }),
         }
       );
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "energetic live performance, cinematic neon, 4k";
-      await handlePromptSubmit(text.trim());
-    } catch (err: any) {
-      setError(err?.message || "Failed to generate visuals.");
-    } finally {
-      setBusy(false);
-    }
+    const data = await response.json();
+
+const text =
+  data.candidates?.[0]?.content?.parts?.[0]?.text ||
+  "energetic live performance, cinematic neon, 4k";
+
+await handlePromptSubmit(text.trim());
+
+} catch (err: unknown) {
+  const message =
+    err instanceof Error
+      ? err.message
+      : "Failed to generate visuals.";
+
+  setError(message);
+} finally {
+  setBusy(false);
+}
   };
 
   /* ============================================================

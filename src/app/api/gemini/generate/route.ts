@@ -47,7 +47,8 @@ Return exactly 5 lines.`;
       text:
         data.candidates?.[0]?.content?.parts?.[0]?.text || "",
     });
-  } catch (err: any) {
+  } catch (err: unknown
+  ) {
     console.error("Gemini error:", err);
     return new NextResponse("Gemini failed", { status: 500 });
   }
