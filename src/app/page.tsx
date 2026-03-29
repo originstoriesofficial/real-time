@@ -63,22 +63,27 @@ type PlaybackResponse = {
     source?: PlaybackSource[];
   };
 };
-
 async function getPlaybackUrl(playbackId: string): Promise<string | null> {
   try {
     const res = await fetch(`https://livepeer.studio/api/playback/${playbackId}`);
     if (!res.ok) throw new Error("Failed to fetch playback");
 
-    const data: PlaybackResponse = await res.json();
+    const data = await res.json();
 
+    console.log("PLAYBACK META:", data.meta);
+
+    // ✅ TRUE WebRTC (WHEP)
     const webrtc = data.meta?.source?.find(
-      (source) => source.type === "html5/video/h264"
+      (s: any) => s.type === "webrtc"
     );
+
     if (webrtc?.url) return webrtc.url;
 
+    // ✅ fallback to HLS (IMPORTANT)
     const hls = data.meta?.source?.find(
-      (source) => source.type === "html5/application/vnd.apple.mpegurl"
+      (s: any) => s.type === "hls"
     );
+
     if (hls?.url) return hls.url;
 
     return null;
@@ -415,7 +420,7 @@ if (state !== "live" || playerRef.current || !s?.playbackId) return;
 
   try {
     // ✅ small delay → playback becomes available
-    await sleep(1000);
+    await sleep(2500);
 
 const url = await getPlaybackUrl(s.playbackId);
     if (!url) throw new Error("No playback URL");
