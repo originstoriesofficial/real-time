@@ -55,6 +55,24 @@ type SpeedSettings = {
   guidance_scale: number;
 };
 
+async function getPlaybackUrl(playbackId: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://livepeer.studio/api/playback/${playbackId}`
+    );
+
+    const data = await res.json();
+
+    const webrtc = data.meta?.source?.find(
+      (s: any) => s.hrn === "WebRTC (H264)"
+    );
+
+    return webrtc?.url ?? null;
+  } catch (err) {
+    console.error("Failed to fetch playback URL", err);
+    return null;
+  }
+}
 /* ============================================================
    UTILS
    ============================================================ */
@@ -390,13 +408,18 @@ broadcast.on("stateChange", async (state: BroadcastState) => {
   console.log("Broadcast:", state);
   setBroadcastState(state);
 
-  // only init once
-  if (state !== "live" || playerRef.current) return;
+  // ✅ only init once + only when live
+  if (state !== "live" || playerRef.current || !stream?.playbackId) return;
 
   try {
-    const whepUrl = await waitForWhep(broadcast);
+    // ✅ small delay → playback becomes available
+    await sleep(1000);
 
-    const player = createPlayer(forceHttps(whepUrl), {
+    const url = await getPlaybackUrl(stream.playbackId);
+
+    if (!url) throw new Error("No playback URL");
+
+    const player = createPlayer(url, {
       reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
     });
 
@@ -411,18 +434,21 @@ broadcast.on("stateChange", async (state: BroadcastState) => {
       console.error("Player error:", err);
       setPlayerState("error");
       setError(err.message || "Playback error.");
+
+      // ✅ allow re-init if player dies
+      playerRef.current = null;
     });
 
-    // connect with retry
+    // ✅ connect with retry
     try {
       await player.connect();
-    } catch (err) {
+    } catch {
       console.warn("Player connect failed, retrying...");
       await sleep(2000);
       await player.connect();
     }
 
-    // attach safely
+    // ✅ attach AFTER connect
     const video = outputVideoRef.current;
     if (video) {
       player.attachTo(video);
@@ -433,11 +459,10 @@ broadcast.on("stateChange", async (state: BroadcastState) => {
     console.error("Player setup failed:", err);
     setError(err instanceof Error ? err.message : "Player failed");
 
-    // reset so it can retry on next "live"
+    // ✅ critical: reset so next "live" retries cleanly
     playerRef.current = null;
   }
 });
-
 // start AFTER listeners
 await broadcast.connect();
 
