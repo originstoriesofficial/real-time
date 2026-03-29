@@ -392,11 +392,11 @@ player.on("stateChange", (ps: PlayerState) => {
   setPlayerState(ps);
 });
 
-    player.on("error", (err: Error) => {
-      console.error("Player error:", err);
-      setPlayerState("error");
-      setError(err?.message || "Playback error.");
-    });
+player.on("error", (err: Error) => {
+  console.error("Player error:", err);
+  setPlayerState("error");
+  setError(err.message || "Playback error.");
+});
 
     await player.connect();
 
@@ -410,7 +410,7 @@ player.on("stateChange", (ps: PlayerState) => {
 broadcast.on("error", (err: Error) => {
   console.error("Broadcast error:", err);
   setBroadcastState("error");
-  setError(err?.message || "Broadcast error.");
+  setError(err.message || "Broadcast error.");
 });
       await broadcast.connect();
    } catch (err: unknown) {
