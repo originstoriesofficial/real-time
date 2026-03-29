@@ -354,6 +354,12 @@ const startCamera = async () => {
   setError(null);
 
   try {
+    // clean old instances if user retries
+    try { playerRef.current?.stop?.(); } catch {}
+    try { broadcastRef.current?.stop?.(); } catch {}
+    playerRef.current = null;
+    broadcastRef.current = null;
+
     const s = await createStream();
     if (!s?.whipUrl) throw new Error("Missing WHIP URL.");
 
@@ -384,66 +390,15 @@ const startCamera = async () => {
     const broadcast = createBroadcast({
       whipUrl: safeWhip,
       stream: mediaStream,
-      reconnect: {
-        enabled: true,
-        maxAttempts: 10,
-        baseDelayMs: 2000,
-      },
+      reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
     });
 
     broadcastRef.current = broadcast;
     setBroadcastState("connecting");
 
-    broadcast.on("stateChange", async (state: BroadcastState) => {
+    broadcast.on("stateChange", (state: BroadcastState) => {
       console.log("Broadcast:", state);
       setBroadcastState(state);
-
-      if (state !== "live") return;
-      if (playerRef.current) return;
-
-      try {
-        const whepUrl = forceHttps((broadcast as any).whepUrl || "");
-
-        if (!whepUrl) {
-          throw new Error("Missing WHEP URL from broadcast");
-        }
-
-        console.log("FINAL WHEP USED:", whepUrl);
-
-        const player = createPlayer(whepUrl, {
-          reconnect: {
-            enabled: true,
-            maxAttempts: 10,
-            baseDelayMs: 2000,
-          },
-        });
-
-        playerRef.current = player;
-
-        player.on("stateChange", (ps: PlayerState) => {
-          console.log("Player:", ps);
-          setPlayerState(ps);
-        });
-
-        player.on("error", (err: Error) => {
-          console.error("Player error:", err);
-          setPlayerState("error");
-          setError(err.message || "Playback error");
-          playerRef.current = null;
-        });
-
-        await player.connect();
-
-        const video = outputVideoRef.current;
-        if (video) {
-          player.attachTo(video);
-          await video.play().catch(() => {});
-        }
-      } catch (err) {
-        console.error("Player setup failed:", err);
-        setError(err instanceof Error ? err.message : "Player failed");
-        playerRef.current = null;
-      }
     });
 
     broadcast.on("error", (err: Error) => {
@@ -453,6 +408,43 @@ const startCamera = async () => {
     });
 
     await broadcast.connect();
+
+    const whepUrl = forceHttps(broadcast.whepUrl);
+    if (!whepUrl) {
+      throw new Error("Missing WHEP URL from broadcast");
+    }
+
+    console.log("FINAL WHEP USED:", whepUrl);
+
+    setPlayerState("connecting");
+
+    const player = createPlayer(whepUrl, {
+      reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
+    });
+
+    playerRef.current = player;
+
+    player.on("stateChange", (ps: PlayerState) => {
+      console.log("Player:", ps);
+      setPlayerState(ps);
+    });
+
+    player.on("error", (err: Error) => {
+      console.error("Player error:", err);
+      setPlayerState("error");
+      setError(err.message || "Playback error");
+      playerRef.current = null;
+    });
+
+    await player.connect();
+
+    const video = outputVideoRef.current;
+    if (!video) {
+      throw new Error("Missing output video element");
+    }
+
+    player.attachTo(video);
+    await video.play().catch(() => {});
   } catch (err) {
     console.error("startCamera failed:", err);
 
@@ -460,6 +452,7 @@ const startCamera = async () => {
       err instanceof Error ? err.message : "Failed to start camera."
     );
     setBroadcastState("error");
+    setPlayerState("error");
   } finally {
     setBusy(false);
   }
