@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Daydream } from "@daydreamlive/sdk";
 
 const daydream = new Daydream({
   bearer: process.env.DAYDREAM_API_KEY!,
 });
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
     const stream = await daydream.streams.create({
       pipeline: "streamdiffusion",
@@ -21,12 +21,15 @@ export async function POST() {
       },
     });
 
-    const whipUrl = new URL(stream.whipUrl);
-    whipUrl.protocol = "https:";
+    const upstreamWhip = new URL(stream.whipUrl);
+    const proxyWhip = new URL(
+      `/api/daydream/whip${upstreamWhip.pathname}${upstreamWhip.search}`,
+      req.nextUrl.origin
+    );
 
     return NextResponse.json({
       id: String(stream.id),
-      whipUrl: whipUrl.toString(),
+      whipUrl: proxyWhip.toString(),
       playbackId: String(stream.outputPlaybackId ?? ""),
     });
   } catch (err) {
