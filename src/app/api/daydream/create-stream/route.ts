@@ -20,18 +20,18 @@ export async function POST(req: NextRequest) {
         tIndexList: [12, 20, 24],
       },
     });
+const upstreamWhip = new URL(stream.whipUrl);
 
-    const upstreamWhip = new URL(stream.whipUrl);
-    const proxyWhip = new URL(
-      `/api/daydream/whip${upstreamWhip.pathname}${upstreamWhip.search}`,
-      req.nextUrl.origin
-    );
+const proxyWhip = new URL(
+  `/api/daydream/whip${upstreamWhip.pathname}${upstreamWhip.search}`,
+  req.nextUrl.origin
+);
 
-    return NextResponse.json({
-      id: String(stream.id),
-      whipUrl: proxyWhip.toString(),
-      playbackId: String(stream.outputPlaybackId ?? ""),
-    });
+return NextResponse.json({
+  id: String(stream.id),
+  whipUrl: proxyWhip.toString(),
+  playbackId: String(stream.outputPlaybackId ?? ""),
+});
   } catch (err) {
     console.error("create-stream failed:", err);
     return NextResponse.json(
