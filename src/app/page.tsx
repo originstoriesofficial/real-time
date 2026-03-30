@@ -435,16 +435,16 @@ export default function Home() {
         console.log("Broadcast:", state);
         setBroadcastState(state);
 
-     if (state === "live") {
-  setError(null);
-
-  if (!broadcast.whepUrl) {
-    console.warn("Missing WHEP URL");
-    return;
-  }
-
-  await startPlayer(broadcast.whepUrl);
-}
+        if (state === "live") {
+          // Always re-create the player on every "live" event (initial + reconnects)
+          // so we get the fresh WHEP URL and avoid stale gateway URLs.
+          setError(null);
+          if (broadcast.whepUrl) {
+            await startPlayer(broadcast.whepUrl);
+          } else {
+            setError("Missing WHEP URL from broadcast");
+          }
+        }
 
         if (state === "ended" || state === "error") {
           try { playerRef.current?.stop?.(); } catch {}
