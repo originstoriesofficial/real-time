@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { Daydream } from "@daydreamlive/sdk";
 
 const daydream = new Daydream({
   bearer: process.env.DAYDREAM_API_KEY!,
 });
 
-export async function POST(req: NextRequest) {
+export async function POST() {
   try {
     const stream = await daydream.streams.create({
       pipeline: "streamdiffusion",
@@ -20,22 +20,23 @@ export async function POST(req: NextRequest) {
         tIndexList: [12, 20, 24],
       },
     });
-const upstreamWhip = new URL(stream.whipUrl);
 
-const proxyWhip = new URL(
-  `/api/daydream/whip${upstreamWhip.pathname}${upstreamWhip.search}`,
-  req.nextUrl.origin
-);
+    console.log("STREAM CREATED:", stream);
 
-return NextResponse.json({
-  id: String(stream.id),
-  whipUrl: proxyWhip.toString(),
-  playbackId: String(stream.outputPlaybackId ?? ""),
-});
+    if (!stream?.whipUrl) {
+      throw new Error("No whipUrl returned from Daydream");
+    }
+
+    return NextResponse.json({
+      id: stream.id,
+      whipUrl: stream.whipUrl,
+      playbackId: stream.outputPlaybackId,
+    });
   } catch (err) {
-    console.error("create-stream failed:", err);
+    console.error("CREATE STREAM FAILED:", err);
+
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to create stream" },
+      { error: "Failed to create stream" },
       { status: 500 }
     );
   }
