@@ -377,7 +377,7 @@ export default function Home() {
       const broadcast = createBroadcast({
         whipUrl: safeWhip,
         stream: mediaStream,
-        reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 }, // ✅ baseDelay not baseDelayMs
+        reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
       });
 
       broadcastRef.current = broadcast;
@@ -399,7 +399,7 @@ export default function Home() {
           setPlayerState("connecting");
 
           const player = createPlayer(whepUrl, {
-            reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 }, // ✅ baseDelay not baseDelayMs
+            reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
           });
 
           playerRef.current = player;

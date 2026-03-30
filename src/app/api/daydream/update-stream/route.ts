@@ -37,7 +37,7 @@ export async function POST(req: Request) {
         motionSpeed === "slow" ? 12 : motionSpeed === "medium" ? 8 : 4,
     };
 
-    const patch = async () =>
+    const patch = () =>
       fetch(`https://api.daydream.live/v1/streams/${streamId}`, {
         method: "PATCH",
         headers: {
@@ -47,21 +47,45 @@ export async function POST(req: Request) {
         body: JSON.stringify({ pipeline: "streamdiffusion", params }),
       });
 
+    const isNotReady = (text: string) =>
+      text.includes("STREAMS/NOT_FOUND") ||
+      text.includes("Stream not ready") ||
+      text.includes("not found");
+
+    // Pipeline can take 15-30s to warm after creation — retry with backoff.
+    const delays = [3000, 5000, 7000, 9000, 11000];
     let res = await patch();
 
     if (!res.ok) {
-      const text = await res.text();
-      if (text.includes("STREAMS/NOT_FOUND") || text.includes("Stream not ready")) {
-        await new Promise((r) => setTimeout(r, 3000));
-        res = await patch();
-      } else {
+      let text = await res.text();
+
+      if (!isNotReady(text)) {
+        // A real error, not a warmup race — fail immediately.
         return new NextResponse(text, { status: 500 });
       }
-    }
 
-    if (!res.ok) {
-      const text = await res.text();
-      return new NextResponse(text, { status: 500 });
+      let succeeded = false;
+      for (const delay of delays) {
+        await new Promise((r) => setTimeout(r, delay));
+        res = await patch();
+
+        if (res.ok) {
+          succeeded = true;
+          break;
+        }
+
+        text = await res.text();
+        if (!isNotReady(text)) {
+          return new NextResponse(text, { status: 500 });
+        }
+      }
+
+      if (!succeeded) {
+        return new NextResponse(
+          "Stream pipeline did not become ready in time. Please try again.",
+          { status: 503 }
+        );
+      }
     }
 
     return NextResponse.json({ ok: true });
