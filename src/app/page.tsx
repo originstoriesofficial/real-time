@@ -263,6 +263,21 @@ export default function Home() {
 const broadcastRef = useRef<any>(null);
   const playerRef = useRef<ReturnType<typeof createPlayer> | null>(null);
 
+
+type PlayerInstance = {
+  connect: () => Promise<void>;
+  stop?: () => void;
+  attachTo: (el: HTMLVideoElement) => void;
+  on: (event: string, cb: (...args: any[]) => void) => void;
+};
+
+type BroadcastInstance = {
+  connect: () => Promise<void>;
+  stop?: () => void;
+  whepUrl?: string;
+  on: (event: string, cb: (...args: any[]) => void) => void;
+};
+
   /* ── Load cameras ── */
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.mediaDevices) return;
@@ -423,49 +438,58 @@ if (broadcastRef.current) {
     });
 await broadcast.connect();
 
-// wait until whep exists
+// 🔴 wait for VALID whep (not just truthy)
 let attempts = 0;
-while (!broadcast.whepUrl && attempts < 10) {
+let whepUrl: string | undefined;
+
+while (attempts < 20) {
+  const url = broadcast.whepUrl;
+
+  if (url && url.startsWith("https://") && !url.includes("stk_")) {
+    whepUrl = url;
+    break;
+  }
+
   await new Promise(r => setTimeout(r, 300));
   attempts++;
 }
 
-const whepUrl = forceHttps(broadcast.whepUrl);
-
 if (!whepUrl) {
-  throw new Error("WHEP URL not ready after connect");
+  throw new Error("WHEP never became valid");
 }
 
-    console.log("FINAL WHEP USED:", whepUrl);
+console.log("REAL WHEP:", whepUrl);
 
-    setPlayerState("connecting");
+await new Promise(r => setTimeout(r, 500));
 
-    const player = createPlayer(whepUrl, {
-      reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
-    });
+setPlayerState("connecting");
 
-    playerRef.current = player;
+const player = createPlayer(whepUrl, {
+  reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
+});
 
-    player.on("stateChange", (ps: PlayerState) => {
-      console.log("Player:", ps);
-      setPlayerState(ps);
-    });
+playerRef.current = player;
 
-    player.on("error", (err: Error) => {
-      console.error("Player error:", err);
-      setPlayerState("error");
-      setError(err.message || "Playback error");
-      playerRef.current = null;
-    });
+player.on("stateChange", (ps: PlayerState) => {
+  console.log("Player:", ps);
+  setPlayerState(ps);
+});
 
-    await player.connect();
+player.on("error", (err: Error) => {
+  console.error("Player error:", err);
+  setPlayerState("error");
+  setError(err.message || "Playback error");
+  playerRef.current = null;
+});
 
-    const video = outputVideoRef.current;
-    if (!video) {
-      throw new Error("Missing output video element");
-    }
+await player.connect();
 
-    player.attachTo(video);
+const video = outputVideoRef.current;
+if (!video) throw new Error("Missing output video element");
+
+player.attachTo(video);
+
+await video.play().catch(() => {});
     await video.play().catch(() => {});
   } catch (err) {
     console.error("startCamera failed:", err);
