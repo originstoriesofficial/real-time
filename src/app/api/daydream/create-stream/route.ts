@@ -31,11 +31,8 @@ export async function POST() {
     });
   } catch (err) {
     console.error("create-stream failed:", err);
-
     return NextResponse.json(
-      {
-        error: err instanceof Error ? err.message : "Failed to create stream",
-      },
+      { error: err instanceof Error ? err.message : "Failed to create stream" },
       { status: 500 }
     );
   }
