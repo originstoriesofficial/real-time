@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { createBroadcast, createPlayer } from "@daydreamlive/browser";
+import { Broadcast, createBroadcast, createPlayer } from "@daydreamlive/browser";
 
 /* ============================================================
    VPM PRO – Visual Performance Mixer
@@ -260,7 +260,7 @@ export default function Home() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const outputVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
-  const broadcastRef = useRef<ReturnType<typeof createBroadcast> | null>(null);
+const broadcastRef = useRef<any>(null);
   const playerRef = useRef<ReturnType<typeof createPlayer> | null>(null);
 
   /* ── Load cameras ── */
@@ -379,13 +379,34 @@ const startCamera = async () => {
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = mediaStream;
     }
+const rawWhip = s.whipUrl;
 
-    const safeWhip = forceHttps(s.whipUrl);
-    console.log("FINAL WHIP USED:", safeWhip);
+if (!rawWhip) {
+  throw new Error("No WHIP URL returned");
+}
 
-    if (!safeWhip.startsWith("https://")) {
-      throw new Error(`Refusing insecure WHIP URL: ${safeWhip}`);
-    }
+// only fix protocol — never touch host
+const safeWhip = rawWhip.replace(/^http:\/\//i, "https://");
+
+console.log("WHIP RAW:", rawWhip);
+console.log("WHIP FINAL:", safeWhip);
+
+// block legacy http endpoints explicitly
+if (rawWhip.startsWith("http://")) {
+  console.warn("⚠️ Daydream returned HTTP WHIP — forcing HTTPS");
+}
+
+if (!safeWhip.startsWith("https://")) {
+  throw new Error(`Invalid WHIP URL: ${safeWhip}`);
+}
+
+// kill any old instance completely
+if (broadcastRef.current) {
+  try {
+    broadcastRef.current.stop?.();
+  } catch {}
+  broadcastRef.current = null;
+}
 
     const broadcast = createBroadcast({
       whipUrl: safeWhip,
