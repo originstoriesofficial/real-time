@@ -21,15 +21,11 @@ function rewriteToWhipProxy(url: string, req: NextRequest): string {
   return `${req.nextUrl.origin}/api/daydream/whip${parsed.pathname}${parsed.search}`;
 }
 
-function rewriteToWhepProxy(url: string, req: NextRequest): string {
-  const parsed = new URL(url, WHIP_UPSTREAM_ORIGIN);
-  parsed.protocol = "https:";
-
-  return `${req.nextUrl.origin}/api/daydream/whep${parsed.pathname}${parsed.search}`;
-}
-
 async function handle(req: NextRequest, path: string[]) {
-  const upstreamUrl = new URL(`/${path.join("/")}${req.nextUrl.search}`, WHIP_UPSTREAM_ORIGIN);
+  const upstreamUrl = new URL(
+    `/${path.join("/")}${req.nextUrl.search}`,
+    WHIP_UPSTREAM_ORIGIN
+  );
 
   const body =
     req.method === "GET" || req.method === "HEAD"
@@ -51,7 +47,15 @@ async function handle(req: NextRequest, path: string[]) {
 
   const playbackUrl = headers.get("livepeer-playback-url");
   if (playbackUrl) {
-    headers.set("livepeer-playback-url", rewriteToWhepProxy(playbackUrl, req));
+    const parsed = new URL(playbackUrl);
+    parsed.protocol = "https:";
+
+    headers.set(
+      "livepeer-playback-url",
+      `${req.nextUrl.origin}/api/daydream/whep?target=${encodeURIComponent(
+        parsed.toString()
+      )}`
+    );
   }
 
   return new NextResponse(upstreamRes.body, {
@@ -77,6 +81,22 @@ export async function PATCH(
 }
 
 export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  const { path } = await params;
+  return handle(req, path);
+}
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  const { path } = await params;
+  return handle(req, path);
+}
+
+export async function HEAD(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
