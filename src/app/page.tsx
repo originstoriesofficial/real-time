@@ -361,15 +361,11 @@ export default function Home() {
       });
 
       localStreamRef.current = mediaStream;
+      setCameraStarted(true);
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = mediaStream;
       }
-
-      setCameraStarted(true);
-
-      // Wait one frame for React to render the output video element into the DOM
-      await new Promise(r => setTimeout(r, 100));
 
       const safeWhip = forceHttps(s.whipUrl);
       console.log("FINAL WHIP USED:", safeWhip);
@@ -381,75 +377,55 @@ export default function Home() {
       const broadcast = createBroadcast({
         whipUrl: safeWhip,
         stream: mediaStream,
-        // Disable SDK reconnect — we handle it manually so we can
-        // always use a fresh HTTPS WHEP URL after reconnection.
-        reconnect: { enabled: false },
+        reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
       });
 
       broadcastRef.current = broadcast;
       setBroadcastState("connecting");
 
-      const startPlayer = async (whepUrl: string) => {
-        // Stop any existing player before creating a new one
-        try { playerRef.current?.stop?.(); } catch {}
-        playerRef.current = null;
-
-        const safeWhep = forceHttps(whepUrl);
-        if (!safeWhep) {
-          setError("Missing WHEP URL");
-          return;
-        }
-
-        console.log("FINAL WHEP USED:", safeWhep);
-        setPlayerState("connecting");
-
-        const player = createPlayer(safeWhep, {
-          reconnect: { enabled: false },
-        });
-
-        playerRef.current = player;
-
-        player.on("stateChange", (ps: PlayerState) => {
-          console.log("Player:", ps);
-          setPlayerState(ps);
-        });
-
-        player.on("error", (err: Error) => {
-          console.error("Player error:", err);
-          setPlayerState("error");
-          playerRef.current = null;
-        });
-
-        await player.connect();
-        await new Promise(r => setTimeout(r, 300));
-
-        const video = outputVideoRef.current;
-        if (!video) return;
-
-        player.attachTo(video);
-        await new Promise(r => setTimeout(r, 200));
-        await video.play().catch(() => {});
-      };
-
+      // ✅ Player is created here — inside stateChange — so whepUrl is guaranteed to exist
       broadcast.on("stateChange", async (state: BroadcastState) => {
         console.log("Broadcast:", state);
         setBroadcastState(state);
 
-        if (state === "live") {
-          // Always re-create the player on every "live" event (initial + reconnects)
-          // so we get the fresh WHEP URL and avoid stale gateway URLs.
-          setError(null);
-          if (broadcast.whepUrl) {
-            await startPlayer(broadcast.whepUrl);
-          } else {
+        if (state === "live" && !playerRef.current) {
+          const whepUrl = forceHttps(broadcast.whepUrl);
+          if (!whepUrl) {
             setError("Missing WHEP URL from broadcast");
+            return;
           }
-        }
 
-        if (state === "ended" || state === "error") {
-          try { playerRef.current?.stop?.(); } catch {}
-          playerRef.current = null;
-          setPlayerState("idle");
+          console.log("FINAL WHEP USED:", whepUrl);
+          setPlayerState("connecting");
+
+          const player = createPlayer(whepUrl, {
+            reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
+          });
+
+          playerRef.current = player;
+
+          player.on("stateChange", (ps: PlayerState) => {
+            console.log("Player:", ps);
+            setPlayerState(ps);
+          });
+
+          player.on("error", (err: Error) => {
+            console.error("Player error:", err);
+            setPlayerState("error");
+            setError(err.message || "Playback error");
+            playerRef.current = null;
+          });
+
+          await player.connect();
+
+          const video = outputVideoRef.current;
+          if (!video) {
+            setError("Missing output video element");
+            return;
+          }
+
+          player.attachTo(video);
+          await video.play().catch(() => {});
         }
       });
 
@@ -732,7 +708,6 @@ Return exactly 5 lines.`,
           ref={outputVideoRef}
           autoPlay playsInline muted
           onLoadedMetadata={() => outputVideoRef.current?.play().catch(() => {})}
-          onCanPlay={() => outputVideoRef.current?.play().catch(() => {})}
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
         />
 
