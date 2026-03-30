@@ -18,6 +18,7 @@ import { createBroadcast, createPlayer } from "@daydreamlive/browser";
 /* ============================================================
    CONFIG
    ============================================================ */
+const API_KEY = process.env.DAYDREAM_API_KEY ?? "";
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
 
 const MODES = ["dj", "performance", "live"] as const;
@@ -52,7 +53,16 @@ type SpeedSettings = {
   t_index_list: number[];
   guidance_scale: number;
 };
+type PlaybackSource = {
+  type?: string;
+  url?: string;
+};
 
+type PlaybackResponse = {
+  meta?: {
+    source?: PlaybackSource[];
+  };
+};
 /* ============================================================
    UTILS
    ============================================================ */
@@ -295,68 +305,63 @@ export default function Home() {
     const el = containerRef.current;
     if (!el) return;
     if (el.requestFullscreen) { void el.requestFullscreen(); return; }
-    interface WebkitFullscreenElement extends HTMLElement {
-      webkitRequestFullscreen?: () => Promise<void>;
-    }
-    (el as WebkitFullscreenElement).webkitRequestFullscreen?.();
+  interface WebkitFullscreenElement extends HTMLElement {
+  webkitRequestFullscreen?: () => Promise<void>;
+}
+
+(el as WebkitFullscreenElement).webkitRequestFullscreen?.();
   }, []);
 
   /* ============================================================
-     STREAM CREATION
+     STREAM CREATION — calls Daydream API directly
      ============================================================ */
-  const createStream = useCallback(async (): Promise<StreamData | null> => {
-    try {
-      const res = await fetch("/api/daydream/create-stream", { method: "POST" });
-      if (!res.ok) throw new Error(await res.text());
+// ✅ FRONTEND (clean)
+const createStream = useCallback(async (): Promise<StreamData | null> => {
+  try {
+    const res = await fetch("/api/daydream/create-stream", {
+      method: "POST",
+    });
 
-      const data = await res.json();
-      const whipUrl = forceHttps(String(data.whipUrl || ""));
+    if (!res.ok) throw new Error(await res.text());
 
-      if (!whipUrl.startsWith("https://")) {
-        throw new Error(`Backend returned insecure WHIP URL: ${whipUrl}`);
-      }
+    const data = await res.json();
+    const whipUrl = forceHttps(String(data.whipUrl || ""));
 
-      const streamData: StreamData = {
-        id: String(data.id),
-        playbackId: String(data.playbackId ?? ""),
-        whipUrl,
-      };
-
-      console.log("STREAM DATA:", streamData);
-      setStream(streamData);
-      return streamData;
-    } catch (err) {
-      console.error("createStream failed:", err);
-      setError(err instanceof Error ? err.message : "Failed to create stream");
-      return null;
+    if (!whipUrl.startsWith("https://")) {
+      throw new Error(`Backend returned insecure WHIP URL: ${whipUrl}`);
     }
-  }, []);
 
+  const streamData: StreamData = {
+  id: String(data.id),
+  playbackId: String(data.outputPlaybackId ?? ""), // FIX
+  whipUrl,
+};
+
+    console.log("STREAM DATA:", streamData);
+    setStream(streamData);
+    return streamData;
+  } catch (err) {
+    console.error("createStream failed:", err);
+    setError(err instanceof Error ? err.message : "Failed to create stream");
+    return null;
+  }
+}, []);
   /* ============================================================
      CAMERA START
-     Race condition fix: player is created inside stateChange === "live",
-     which guarantees broadcast.whepUrl is populated before we use it.
      ============================================================ */
-const startCamera = async (): Promise<void> => {
+const startCamera = async () => {
   setBusy(true);
   setError(null);
 
   try {
-    try {
-      playerRef.current?.stop?.();
-    } catch {}
-
-    try {
-      broadcastRef.current?.stop?.();
-    } catch {}
-
+    // clean old instances if user retries
+    try { playerRef.current?.stop?.(); } catch {}
+    try { broadcastRef.current?.stop?.(); } catch {}
     playerRef.current = null;
     broadcastRef.current = null;
 
     const s = await createStream();
-    if (!s?.whipUrl) {
-      throw new Error("Missing WHIP URL.");
-    }
+    if (!s?.whipUrl) throw new Error("Missing WHIP URL.");
 
     const mediaStream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -369,14 +374,11 @@ const startCamera = async (): Promise<void> => {
     });
 
     localStreamRef.current = mediaStream;
+    setCameraStarted(true);
 
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = mediaStream;
     }
-
-    setCameraStarted(true);
-
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
 
     const safeWhip = forceHttps(s.whipUrl);
     console.log("FINAL WHIP USED:", safeWhip);
@@ -388,11 +390,7 @@ const startCamera = async (): Promise<void> => {
     const broadcast = createBroadcast({
       whipUrl: safeWhip,
       stream: mediaStream,
-      reconnect: {
-        enabled: true,
-        maxAttempts: 10,
-        baseDelayMs: 2000,
-      },
+      reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
     });
 
     broadcastRef.current = broadcast;
@@ -408,56 +406,58 @@ const startCamera = async (): Promise<void> => {
       setBroadcastState("error");
       setError(err.message || "Broadcast error.");
     });
+await broadcast.connect();
 
-    await broadcast.connect();
+// wait until whep exists
+let attempts = 0;
+while (!broadcast.whepUrl && attempts < 10) {
+  await new Promise(r => setTimeout(r, 300));
+  attempts++;
+}
 
-    try {
-      const whepUrl = forceHttps(broadcast.whepUrl);
-      if (!whepUrl) {
-        throw new Error("Missing WHEP URL from broadcast");
-      }
+const whepUrl = forceHttps(broadcast.whepUrl);
 
-      console.log("FINAL WHEP USED:", whepUrl);
-      setPlayerState("connecting");
+if (!whepUrl) {
+  throw new Error("WHEP URL not ready after connect");
+}
 
-      const player = createPlayer(whepUrl, {
-        reconnect: {
-          enabled: true,
-          maxAttempts: 10,
-          baseDelayMs: 2000,
-        },
-      });
+    console.log("FINAL WHEP USED:", whepUrl);
 
-      playerRef.current = player;
+    setPlayerState("connecting");
 
-      player.on("stateChange", (ps: PlayerState) => {
-        console.log("Player:", ps);
-        setPlayerState(ps);
-      });
+    const player = createPlayer(whepUrl, {
+      reconnect: { enabled: true, maxAttempts: 10, baseDelayMs: 2000 },
+    });
 
-      player.on("error", (err: Error) => {
-        console.error("Player error:", err);
-        setPlayerState("error");
-        setError(err.message || "Playback error");
-      });
+    playerRef.current = player;
 
-      await player.connect();
+    player.on("stateChange", (ps: PlayerState) => {
+      console.log("Player:", ps);
+      setPlayerState(ps);
+    });
 
-      const video = outputVideoRef.current;
-      if (!video) {
-        throw new Error("Missing output video element");
-      }
-
-      player.attachTo(video);
-      await video.play().catch(() => {});
-    } catch (err) {
-      console.error("Player startup failed:", err);
+    player.on("error", (err: Error) => {
+      console.error("Player error:", err);
       setPlayerState("error");
-      setError(err instanceof Error ? err.message : "Player startup failed");
+      setError(err.message || "Playback error");
+      playerRef.current = null;
+    });
+
+    await player.connect();
+
+    const video = outputVideoRef.current;
+    if (!video) {
+      throw new Error("Missing output video element");
     }
+
+    player.attachTo(video);
+    await video.play().catch(() => {});
   } catch (err) {
     console.error("startCamera failed:", err);
-    setError(err instanceof Error ? err.message : "Failed to start camera.");
+
+    setError(
+      err instanceof Error ? err.message : "Failed to start camera."
+    );
     setBroadcastState("error");
     setPlayerState("error");
   } finally {
@@ -489,41 +489,46 @@ const startCamera = async (): Promise<void> => {
   /* ============================================================
      CORE PROMPT SENDER
      ============================================================ */
-  const sendPromptToDaydream = useCallback(async (finalPrompt: string) => {
-    if (!finalPrompt?.trim()) { setError("Prompt is empty."); return; }
-    if (!stream) { setError("No active stream. Start camera first."); return; }
+const sendPromptToDaydream = useCallback(async (finalPrompt: string) => {
+  if (!finalPrompt?.trim()) { setError("Prompt is empty."); return; }
+  if (!stream) { setError("No active stream. Start camera first."); return; }
 
-    setBusy(true);
-    setError(null);
-    setLastPrompt(finalPrompt);
-    setIsLiveMode(false);
+  setBusy(true);
+  setError(null);
+  setLastPrompt(finalPrompt);
+  setIsLiveMode(false);
 
-    const isAbstract = renderEngine === "ABSTRACT";
-    const speed = getSpeedSettings(motionSpeed, isAbstract);
+  const isAbstract = renderEngine === "ABSTRACT";
+  const speed = getSpeedSettings(motionSpeed, isAbstract);
 
-    try {
-      const res = await fetch("/api/daydream/update-stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          streamId: stream.id,
-          prompt: finalPrompt,
-          isAbstract,
-          speed,
-          motionSpeed,
-        }),
-      });
+  try {
+    const res = await fetch("/api/daydream/update-stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        streamId: stream.id,
+        prompt: finalPrompt,
+        isAbstract,
+        speed,
+        motionSpeed,
+      }),
+    });
 
-      if (!res.ok) throw new Error(await res.text());
-      console.log(`✅ [${renderEngine}] Prompt applied`);
-    } catch (err: unknown) {
-      console.error("❌ Prompt failed:", err);
-      setError(err instanceof Error ? err.message : "Failed to update stream.");
-    } finally {
-      setBusy(false);
-    }
-  }, [stream, renderEngine, motionSpeed]);
+    if (!res.ok) throw new Error(await res.text());
+    console.log(`✅ [${renderEngine}] Prompt applied`);
+} catch (err: unknown) {
+  console.error("❌ Prompt failed:", err);
 
+  const message =
+    err instanceof Error
+      ? err.message
+      : "Failed to update stream.";
+
+  setError(message);
+} finally {
+  setBusy(false);
+}
+}, [stream, renderEngine, motionSpeed]);
   /* ── Prompt submit ── */
   const handlePromptSubmit = useCallback(async (base: string) => {
     if (!base.trim()) { setError("Enter a prompt first."); return; }
@@ -544,27 +549,29 @@ const startCamera = async (): Promise<void> => {
   /* ============================================================
      RETURN TO LIVE
      ============================================================ */
-  const returnToLiveMode = async () => {
-    if (!stream) return;
-    setBusy(true);
+const returnToLiveMode = async () => {
+  if (!stream) return;
+  setBusy(true);
 
-    try {
-      const res = await fetch("/api/daydream/return-live", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ streamId: stream.id }),
-      });
+  try {
+    const res = await fetch("/api/daydream/return-live", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ streamId: stream.id }),
+    });
 
-      if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await res.text());
 
-      setIsLiveMode(true);
-      setLastPrompt("");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to return to live mode.");
-    } finally {
-      setBusy(false);
-    }
-  };
+    setIsLiveMode(true);
+    setLastPrompt("");
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "Failed to return to live mode.";
+    setError(message);
+  } finally {
+    setBusy(false);
+  }
+};
 
   /* ============================================================
      QUESTIONNAIRE + GEMINI
@@ -643,16 +650,24 @@ Return exactly 5 lines.`,
           }),
         }
       );
-      const data = await response.json();
-      const text =
-        data.candidates?.[0]?.content?.parts?.[0]?.text ||
-        "energetic live performance, cinematic neon, 4k";
-      await handlePromptSubmit(text.trim());
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to generate visuals.");
-    } finally {
-      setBusy(false);
-    }
+    const data = await response.json();
+
+const text =
+  data.candidates?.[0]?.content?.parts?.[0]?.text ||
+  "energetic live performance, cinematic neon, 4k";
+
+await handlePromptSubmit(text.trim());
+
+} catch (err: unknown) {
+  const message =
+    err instanceof Error
+      ? err.message
+      : "Failed to generate visuals.";
+
+  setError(message);
+} finally {
+  setBusy(false);
+}
   };
 
   /* ============================================================
@@ -723,14 +738,12 @@ Return exactly 5 lines.`,
         width: "100vw", height: "100vh",
         backgroundColor: "#000", zIndex: 1,
       }}>
- <video
-  ref={outputVideoRef}
-  autoPlay
-  playsInline
-  muted
-  controls
-  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-/>
+        <video
+          ref={outputVideoRef}
+          autoPlay playsInline muted
+          onLoadedMetadata={() => outputVideoRef.current?.play().catch(() => {})}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
 
         {/* Overlay when not live */}
         {broadcastState !== "live" && (
