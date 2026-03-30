@@ -381,24 +381,16 @@ const startCamera = async () => {
     }
 const rawWhip = s.whipUrl;
 
-if (!rawWhip) {
-  throw new Error("No WHIP URL returned");
-}
+if (!rawWhip) throw new Error("Missing WHIP");
 
-// only fix protocol — never touch host
 const safeWhip = rawWhip.replace(/^http:\/\//i, "https://");
 
-console.log("WHIP RAW:", rawWhip);
+// HARD BLOCK bad values
+if (safeWhip.includes("http://")) {
+  throw new Error("Invalid WHIP (http)");
+}
+
 console.log("WHIP FINAL:", safeWhip);
-
-// block legacy http endpoints explicitly
-if (rawWhip.startsWith("http://")) {
-  console.warn("⚠️ Daydream returned HTTP WHIP — forcing HTTPS");
-}
-
-if (!safeWhip.startsWith("https://")) {
-  throw new Error(`Invalid WHIP URL: ${safeWhip}`);
-}
 
 // kill any old instance completely
 if (broadcastRef.current) {
@@ -407,6 +399,8 @@ if (broadcastRef.current) {
   } catch {}
   broadcastRef.current = null;
 }
+
+
 
     const broadcast = createBroadcast({
       whipUrl: safeWhip,
