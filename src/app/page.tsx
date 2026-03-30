@@ -337,133 +337,138 @@ export default function Home() {
      Race condition fix: player is created inside stateChange === "live",
      which guarantees broadcast.whepUrl is populated before we use it.
      ============================================================ */
-const startCamera = async (): Promise<void> => {
-  setBusy(true);
+  const startCamera = async () => {
+    setBusy(true);
+    setError(null);
+
+    try {
+      try { playerRef.current?.stop?.(); } catch {}
+      try { broadcastRef.current?.stop?.(); } catch {}
+      playerRef.current = null;
+      broadcastRef.current = null;
+
+      const s = await createStream();
+      if (!s?.whipUrl) throw new Error("Missing WHIP URL.");
+
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
+          width: 512,
+          height: 512,
+          frameRate: 30,
+        },
+        audio: false,
+      });
+
+      localStreamRef.current = mediaStream;
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = mediaStream;
+      }
+
+      setCameraStarted(true);
+
+      // Wait one frame for React to render the output video element into the DOM
+      await new Promise(r => setTimeout(r, 100));
+
+      const safeWhip = forceHttps(s.whipUrl);
+      console.log("FINAL WHIP USED:", safeWhip);
+
+      if (!safeWhip.startsWith("https://")) {
+        throw new Error(`Refusing insecure WHIP URL: ${safeWhip}`);
+      }
+
+      const broadcast = createBroadcast({
+        whipUrl: safeWhip,
+        stream: mediaStream,
+        // Disable SDK reconnect — we handle it manually so we can
+        // always use a fresh HTTPS WHEP URL after reconnection.
+        reconnect: { enabled: false },
+      });
+
+      broadcastRef.current = broadcast;
+      setBroadcastState("connecting");
+
+      const startPlayer = async (whepUrl: string) => {
+        // Stop any existing player before creating a new one
+        try { playerRef.current?.stop?.(); } catch {}
+        playerRef.current = null;
+
+        const safeWhep = forceHttps(whepUrl);
+        if (!safeWhep) {
+          setError("Missing WHEP URL");
+          return;
+        }
+
+        console.log("FINAL WHEP USED:", safeWhep);
+        setPlayerState("connecting");
+
+        const player = createPlayer(safeWhep, {
+          reconnect: { enabled: false },
+        });
+
+        playerRef.current = player;
+
+        player.on("stateChange", (ps: PlayerState) => {
+          console.log("Player:", ps);
+          setPlayerState(ps);
+        });
+
+        player.on("error", (err: Error) => {
+          console.error("Player error:", err);
+          setPlayerState("error");
+          playerRef.current = null;
+        });
+
+        await player.connect();
+        await new Promise(r => setTimeout(r, 300));
+
+        const video = outputVideoRef.current;
+        if (!video) return;
+
+        player.attachTo(video);
+        await new Promise(r => setTimeout(r, 200));
+        await video.play().catch(() => {});
+      };
+
+      broadcast.on("stateChange", async (state: BroadcastState) => {
+        console.log("Broadcast:", state);
+        setBroadcastState(state);
+
+     if (state === "live") {
   setError(null);
 
-  try {
-    try {
-      playerRef.current?.stop?.();
-    } catch {}
-
-    try {
-      broadcastRef.current?.stop?.();
-    } catch {}
-
-    playerRef.current = null;
-    broadcastRef.current = null;
-
-    const s = await createStream();
-    if (!s?.whipUrl) {
-      throw new Error("Missing WHIP URL.");
-    }
-
-    const mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-        width: 512,
-        height: 512,
-        frameRate: 30,
-      },
-      audio: false,
-    });
-
-    localStreamRef.current = mediaStream;
-
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = mediaStream;
-    }
-
-    setCameraStarted(true);
-
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
-
-    const safeWhip = forceHttps(s.whipUrl);
-    console.log("FINAL WHIP USED:", safeWhip);
-
-    if (!safeWhip.startsWith("https://")) {
-      throw new Error(`Refusing insecure WHIP URL: ${safeWhip}`);
-    }
-
-    const broadcast = createBroadcast({
-      whipUrl: safeWhip,
-      stream: mediaStream,
-      reconnect: {
-        enabled: true,
-        maxAttempts: 10,
-        baseDelayMs: 2000,
-      },
-    });
-
-    broadcastRef.current = broadcast;
-    setBroadcastState("connecting");
-
-    broadcast.on("stateChange", (state: BroadcastState) => {
-      console.log("Broadcast:", state);
-      setBroadcastState(state);
-    });
-
-    broadcast.on("error", (err: Error) => {
-      console.error("Broadcast error:", err);
-      setBroadcastState("error");
-      setError(err.message || "Broadcast error.");
-    });
-
-    await broadcast.connect();
-
-    try {
-      const whepUrl = forceHttps(broadcast.whepUrl);
-      if (!whepUrl) {
-        throw new Error("Missing WHEP URL from broadcast");
-      }
-
-      console.log("FINAL WHEP USED:", whepUrl);
-      setPlayerState("connecting");
-
-      const player = createPlayer(whepUrl, {
-        reconnect: {
-          enabled: true,
-          maxAttempts: 10,
-          baseDelayMs: 2000,
-        },
-      });
-
-      playerRef.current = player;
-
-      player.on("stateChange", (ps: PlayerState) => {
-        console.log("Player:", ps);
-        setPlayerState(ps);
-      });
-
-      player.on("error", (err: Error) => {
-        console.error("Player error:", err);
-        setPlayerState("error");
-        setError(err.message || "Playback error");
-      });
-
-      await player.connect();
-
-      const video = outputVideoRef.current;
-      if (!video) {
-        throw new Error("Missing output video element");
-      }
-
-      player.attachTo(video);
-      await video.play().catch(() => {});
-    } catch (err) {
-      console.error("Player startup failed:", err);
-      setPlayerState("error");
-      setError(err instanceof Error ? err.message : "Player startup failed");
-    }
-  } catch (err) {
-    console.error("startCamera failed:", err);
-    setError(err instanceof Error ? err.message : "Failed to start camera.");
-    setBroadcastState("error");
-    setPlayerState("error");
-  } finally {
-    setBusy(false);
+  if (!broadcast.whepUrl) {
+    console.warn("Missing WHEP URL");
+    return;
   }
-};
+
+  await startPlayer(broadcast.whepUrl);
+}
+
+        if (state === "ended" || state === "error") {
+          try { playerRef.current?.stop?.(); } catch {}
+          playerRef.current = null;
+          setPlayerState("idle");
+        }
+      });
+
+      broadcast.on("error", (err: Error) => {
+        console.error("Broadcast error:", err);
+        setBroadcastState("error");
+        setError(err.message || "Broadcast error.");
+      });
+
+      await broadcast.connect();
+    } catch (err) {
+      console.error("startCamera failed:", err);
+      setError(err instanceof Error ? err.message : "Failed to start camera.");
+      setBroadcastState("error");
+      setPlayerState("error");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   /* ============================================================
      CAMERA STOP
@@ -723,14 +728,13 @@ Return exactly 5 lines.`,
         width: "100vw", height: "100vh",
         backgroundColor: "#000", zIndex: 1,
       }}>
- <video
-  ref={outputVideoRef}
-  autoPlay
-  playsInline
-  muted
-  controls
-  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-/>
+        <video
+          ref={outputVideoRef}
+          autoPlay playsInline muted
+          onLoadedMetadata={() => outputVideoRef.current?.play().catch(() => {})}
+          onCanPlay={() => outputVideoRef.current?.play().catch(() => {})}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
 
         {/* Overlay when not live */}
         {broadcastState !== "live" && (
