@@ -20,7 +20,7 @@ export async function POST(req: Request) {
         Authorization: `Bearer ${API_KEY}`,
       },
       body: JSON.stringify({
-        pipeline: "streamdiffusion",
+        pipeline: "streamdiffusion
         params: {
           model_id: "stabilityai/sd-turbo",
           prompt: "natural realistic video, no filter",
