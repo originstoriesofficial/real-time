@@ -361,11 +361,15 @@ export default function Home() {
       });
 
       localStreamRef.current = mediaStream;
-      setCameraStarted(true);
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = mediaStream;
       }
+
+      setCameraStarted(true);
+
+      // Wait one frame for React to render the output video element into the DOM
+      await new Promise(r => setTimeout(r, 100));
 
       const safeWhip = forceHttps(s.whipUrl);
       console.log("FINAL WHIP USED:", safeWhip);
@@ -418,6 +422,9 @@ export default function Home() {
 
           await player.connect();
 
+          // Give the player a moment to establish the stream before attaching
+          await new Promise(r => setTimeout(r, 300));
+
           const video = outputVideoRef.current;
           if (!video) {
             setError("Missing output video element");
@@ -425,6 +432,7 @@ export default function Home() {
           }
 
           player.attachTo(video);
+          await new Promise(r => setTimeout(r, 200));
           await video.play().catch(() => {});
         }
       });
@@ -708,6 +716,7 @@ Return exactly 5 lines.`,
           ref={outputVideoRef}
           autoPlay playsInline muted
           onLoadedMetadata={() => outputVideoRef.current?.play().catch(() => {})}
+          onCanPlay={() => outputVideoRef.current?.play().catch(() => {})}
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
         />
 
